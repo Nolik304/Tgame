@@ -11,15 +11,13 @@ import Phaser from 'phaser';
 import {
   GAME_W,
   GAME_H,
-  CHAPTERS,
   PROMOS,
   FRUIT_NAMES,
   DAILY_REWARDS,
-  getLevels,
   type LevelDef,
-  type ChestDef,
   type PromoDef,
 } from '../data/gameData';
+import { getLevel, eraOf, goalText as goalLabel, type ChestDef } from '../data/LevelFactory';
 import { playerState, MAX_LIVES } from '../services/PlayerState';
 import { sfx } from '../services/SoundManager';
 import { vk } from '../services/VKBridgeService';
@@ -385,19 +383,11 @@ export class UIScene extends Phaser.Scene {
     setIf(this.gemsText, fmtNum(d.gems));
     const lives = playerState.livesNow();
     setIf(this.livesText, `${lives}/${MAX_LIVES}`);
-    const cur = Math.min(d.level, 24);
-    this.levelChipText.setText(`Уровень ${cur} · ${this.chapterOf(cur)}`);
-    this.playSubText?.setText(`Уровень ${cur} — ${this.levelName(cur)}`);
+    const cur = d.level;
+    this.levelChipText.setText(`Ступень ${cur} · ${eraOf(cur).title}`);
+    this.playSubText?.setText(`Ступень ${cur} — ${getLevel(cur).name}`);
     this.refreshProfile();
     this.updateBoostChip();
-  }
-
-  private chapterOf(id: number): string {
-    return CHAPTERS.find((c) => id >= c.from && id <= c.to)?.title ?? '';
-  }
-
-  private levelName(id: number): string {
-    return getLevels().find((l) => l.id === id)?.name ?? '';
   }
 
   private refreshProfile(): void {
@@ -571,7 +561,7 @@ export class UIScene extends Phaser.Scene {
       draw(false);
       sfx.play('click');
       sfx.vibrate('light');
-      this.scene.get('MapScene')?.events.emit('focusLevel', Math.min(playerState.data.level, 24));
+      this.scene.get('MapScene')?.events.emit('focusLevel', playerState.data.level);
     });
     c.add([g, label, this.playSubText, hit]);
     this.tweens.add({
@@ -619,12 +609,17 @@ export class UIScene extends Phaser.Scene {
     const items: Phaser.GameObjects.GameObject[] = [];
 
     const numText = this.add
-      .text(0, headY, `УРОВЕНЬ ${def.id}`, { fontFamily: RUSSO, fontSize: '27px', color: '#f5b52e' })
+      .text(0, headY, `СТУПЕНЬ ${def.id}`, { fontFamily: RUSSO, fontSize: '27px', color: '#f5b52e' })
       .setOrigin(0.5);
     const nameText = this.add
       .text(0, headY + 32, def.name, { fontFamily: RUBIK, fontSize: '15px', color: '#b9ad87' })
       .setOrigin(0.5);
-    items.push(numText, nameText);
+    const eraText = this.add
+      .text(0, headY + 52, `Эпоха ${eraOf(def.id).numeral} · ${eraOf(def.id).title}`, {
+        fontFamily: RUBIK, fontSize: '11px', color: '#8fd8b4',
+      })
+      .setOrigin(0.5);
+    items.push(numText, nameText, eraText);
 
     if (def.type === 'boss' && def.bossName) {
       items.push(this.add.image(-118, headY + 78, 'skull').setScale(0.8));
@@ -648,29 +643,30 @@ export class UIScene extends Phaser.Scene {
     gBox.strokePath();
     items.push(gBox);
     if (def.goal.type === 'collect') {
-      const icon = this.add
-        .image(-156, goalY, `fruit_${def.goal.kind}`)
-        .setScale(this.fitIcon(`fruit_${def.goal.kind}`, 40));
-      items.push(icon);
       items.push(
-        this.add.text(10, goalY + 1, `Собери ${def.goal.amount} × ${FRUIT_NAMES[def.goal.kind]}`, {
-          fontFamily: RUBIK,
-          fontSize: '16px',
-          fontStyle: 'bold',
-          color: '#f9ecc8',
-        }).setOrigin(0.5),
+        this.add
+          .image(-156, goalY, `fruit_${def.goal.kind}`)
+          .setScale(this.fitIcon(`fruit_${def.goal.kind}`, 40)),
+      );
+    } else if (def.goal.type === 'relic') {
+      items.push(this.add.image(-156, goalY, 'idol').setScale(0.42));
+    } else if (def.goal.type === 'duo') {
+      const [a, b] = def.goal.parts;
+      items.push(
+        this.add.image(-172, goalY, `fruit_${a.kind}`).setScale(this.fitIcon(`fruit_${a.kind}`, 34)),
+        this.add.image(-140, goalY, `fruit_${b.kind}`).setScale(this.fitIcon(`fruit_${b.kind}`, 34)),
       );
     } else {
-      items.push(this.add.image(-156, goalY, 'trophy').setScale(0.85));
-      items.push(
-        this.add.text(10, goalY + 1, `Набери ${fmtNum(def.goal.amount)} очков`, {
-          fontFamily: RUBIK,
-          fontSize: '16px',
-          fontStyle: 'bold',
-          color: '#f9ecc8',
-        }).setOrigin(0.5),
-      );
+      items.push(this.add.image(-156, goalY, 'star').setScale(0.6).setTint(0xf5b52e));
     }
+    items.push(
+      this.add.text(12, goalY + 1, goalLabel(def.goal), {
+        fontFamily: RUBIK,
+        fontSize: '16px',
+        fontStyle: 'bold',
+        color: '#f9ecc8',
+      }).setOrigin(0.5),
+    );
 
     items.push(
       this.add.text(-92, goalY + 62, `Ходы: ${def.moves}`, {

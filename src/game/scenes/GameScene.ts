@@ -19,7 +19,6 @@ import {
   FRUIT_COLORS,
   FRUIT_NAMES,
   SKILLS,
-  getLevels,
   getEventStage,
   EVENT_STAGES,
   EVENT_NAME,
@@ -27,6 +26,7 @@ import {
   type FruitKind,
   type SkillDef,
 } from '../data/gameData';
+import { getLevel, goalText as goalLabel } from '../data/LevelFactory';
 import { playerState } from '../services/PlayerState';
 import { sfx } from '../services/SoundManager';
 import { vk } from '../services/VKBridgeService';
@@ -104,6 +104,7 @@ export class GameScene extends Phaser.Scene {
   private moves = 0;
   private score = 0;
   private collected = 0;
+  private duoCount: [number, number] = [0, 0]; // прогресс двойной цели
   private locked = true;
   private overlayOpen = true;
   private selected: FruitObj | null = null;
@@ -155,14 +156,19 @@ export class GameScene extends Phaser.Scene {
         parScore: 1500 + this.eventStageN * 120,
         rewardCoins: ev.rewardCoins,
         rewardGems: ev.rewardGems,
+        gemCount: 5,
+        era: 1,
+        eraTitle: EVENT_NAME,
       };
     } else {
-      const id = Phaser.Math.Clamp(data?.levelId ?? playerState.data.level, 1, 24);
-      this.level = getLevels().find((l) => l.id === id)!;
+      // бесконечная лестница: уровень генерируется детерминированно по id
+      const id = Math.max(1, Math.floor(data?.levelId ?? playerState.data.level));
+      this.level = getLevel(id);
     }
     this.moves = this.level.moves;
     this.score = 0;
     this.collected = 0;
+    this.duoCount = [0, 0];
     this.locked = true;
     this.overlayOpen = true;
     this.selected = null;
@@ -618,6 +624,9 @@ export class GameScene extends Phaser.Scene {
     const g = this.level.goal;
     if (g.type === 'collect' || g.type === 'relic') {
       this.goalText.setText(`${Math.min(this.collected, g.amount)} / ${g.amount}`);
+    } else if (g.type === 'duo') {
+      const [a, b] = g.parts;
+      this.goalText.setText(`${Math.min(this.duoCount[0], a.amount)}/${a.amount} · ${Math.min(this.duoCount[1], b.amount)}/${b.amount}`);
     } else {
       this.goalText.setText(`${fmtNum(this.score)} / ${fmtNum(g.amount)}`);
     }
@@ -651,8 +660,14 @@ export class GameScene extends Phaser.Scene {
     return targetPx / w;
   }
 
+  /** Виды кристаллов на поле зависят от эпохи (5 или 6). */
+  private kindPool(): FruitKind[] {
+    return FRUIT_KINDS.slice(0, this.level.gemCount);
+  }
+
   private randomKind(): FruitKind {
-    return FRUIT_KINDS[Math.floor(Math.random() * FRUIT_KINDS.length)];
+    const pool = this.kindPool();
+    return pool[Math.floor(Math.random() * pool.length)];
   }
 
   /** Сгенерировать поле без стартовых совпадений и с доступным ходом. */
@@ -1155,12 +1170,13 @@ export class GameScene extends Phaser.Scene {
       this.loseSequence();
       return;
     }
-    // босс контратакует каждые 5 ходов
+    // босс контратакует с периодичностью из эпохи
+    const freezeEvery = this.level.bossFreezeEvery ?? 5;
     if (
       !this.isEvent &&
       this.level.type === 'boss' &&
       this.moves > 0 &&
-      (this.level.moves - this.moves) % 5 === 0
+      (this.level.moves - this.moves) % freezeEvery === 0
     ) {
       await this.bossFreeze();
       if (!this.scene.isActive('GameScene')) return;
@@ -1258,7 +1274,7 @@ export class GameScene extends Phaser.Scene {
         if (f && !f.frozen) candidates.push(f);
       }),
     );
-    const n = Math.min(3, candidates.length);
+    const n = Math.min(this.level.bossFreezeCount ?? 3, candidates.length);
     if (!n) return;
     Phaser.Utils.Array.Shuffle(candidates);
     this.floatText(GAME_W / 2, 380, 'БОСС МОРОЗИТ ПОЛЕ!', '#9adcf5', 20);
@@ -1443,6 +1459,16 @@ export class GameScene extends Phaser.Scene {
       this.collected += counted;
       this.bumpBoss();
       if (this.level.type === 'boss') sfx.vibrate('medium');
+    }
+    // двойная цель: учитываем оба вида
+    if (this.level.goal.type === 'duo') {
+      const [a, b] = this.level.goal.parts;
+      const da = kindCounts.get(a.kind) ?? 0;
+      const db = kindCounts.get(b.kind) ?? 0;
+      if (da > 0 || db > 0) {
+        this.duoCount = [this.duoCount[0] + da, this.duoCount[1] + db];
+        this.updateHUD();
+      }
     }
     if (n > 0) {
       cx /= n;
@@ -1742,6 +1768,10 @@ export class GameScene extends Phaser.Scene {
   private goalMet(): boolean {
     const g = this.level.goal;
     if (g.type === 'collect' || g.type === 'relic') return this.collected >= g.amount;
+    if (g.type === 'duo') {
+      const [a, b] = g.parts;
+      return this.duoCount[0] >= a.amount && this.duoCount[1] >= b.amount;
+    }
     return this.score >= g.amount;
   }
 
@@ -1936,20 +1966,12 @@ export class GameScene extends Phaser.Scene {
       sfx.play('chest');
     }
 
-    if (this.level.id < 24) {
-      items.push(
-        makeButton(this, 'СЛЕДУЮЩАЯ СТУПЕНЬ', () => {
-          this.scene.restart({ levelId: this.level.id + 1 });
-        }, { w: 360, h: 72, style: 'green', font: 20 }).setPosition(0, 108 + extraY),
-      );
-    } else {
-      items.push(
-        this.add.text(0, 104 + extraY, 'Ты поднялся на вершину Лестницы Бога!\nБоги даровали тебе вечную славу!', {
-          fontFamily: RUBIK, fontSize: '16px', fontStyle: 'bold', color: '#9dffce',
-          wordWrap: { width: 380 }, align: 'center',
-        }).setOrigin(0.5),
-      );
-    }
+    // Лестница бесконечна — следующая ступень есть всегда
+    items.push(
+      makeButton(this, 'СЛЕДУЮЩАЯ СТУПЕНЬ', () => {
+        this.scene.restart({ levelId: this.level.id + 1 });
+      }, { w: 360, h: 72, style: 'green', font: 20 }).setPosition(0, 108 + extraY),
+    );
     items.push(
       makeButton(this, 'НА КАРТУ', () => this.exitToMap(), { w: 360, h: 60, style: 'dark', font: 17 }).setPosition(0, 196 + extraY),
     );
@@ -2107,15 +2129,18 @@ export class GameScene extends Phaser.Scene {
         }).setOrigin(0.5),
       );
     }
-    const goalStr =
-      this.level.goal.type === 'collect'
-        ? `Собери ${this.level.goal.amount} × ${FRUIT_NAMES[this.level.goal.kind]}`
-        : `Набери ${fmtNum(this.level.goal.amount)} очков`;
     items.push(
-      this.add.text(0, boss ? -34 : -104, `Цель: ${goalStr}`, {
+      this.add.text(0, boss ? -34 : -104, `Цель: ${goalLabel(this.level.goal)}`, {
         fontFamily: RUBIK, fontSize: '17px', fontStyle: 'bold', color: '#f9ecc8',
       }).setOrigin(0.5),
     );
+    if (this.level.goal.type === 'duo') {
+      const [a, b] = this.level.goal.parts;
+      items.push(
+        this.add.image(-26, -74, `fruit_${a.kind}`).setScale(this.fitScale(`fruit_${a.kind}`, 26)),
+        this.add.image(26, -74, `fruit_${b.kind}`).setScale(this.fitScale(`fruit_${b.kind}`, 26)),
+      );
+    }
     items.push(
       this.add.text(0, boss ? 0 : -68, `Ходы: ${this.level.moves}`, {
         fontFamily: RUSSO, fontSize: '18px', color: '#9dffce',
