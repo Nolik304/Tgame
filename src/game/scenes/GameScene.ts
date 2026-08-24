@@ -1037,6 +1037,9 @@ export class GameScene extends Phaser.Scene {
     this.moves--;
     this.updateHUD();
     await this.cascadeLoop();
+    if (!this.scene.isActive('GameScene')) return;
+    // пассивные тотемы бросают свой шанс после каждого матча
+    await this.maybeProcTotems();
     await this.finishTurn();
   }
 
@@ -1105,61 +1108,99 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Финал уровня в стиле Монтесумы: цель уже выполнена, поэтому каждый
-   * оставшийся ход автоматически превращается в «солнечную бомбу», которая
-   * взрывает 3×3 (с цепными детонациями реликвий) и приносит очки —
-   * так можно дотянуть до 2–3 звёзд.
+   * Финал уровня «минирование»: цель выполнена, все оставшиеся ходы разом
+   * превращаются в бомбы — поле быстро минируется (доли секунды), затем
+   * ОДИН одновременный подрыв всех зон. Очки те же, ожидания никакого.
    */
   private async bonusPhase(): Promise<void> {
     this.clearSelection();
     this.hintTimer?.destroy();
+    const total = this.moves;
+    if (total <= 0) return;
     this.banner('ЦЕЛЬ ВЫПОЛНЕНА!', '#9dffce', 27);
     sfx.play('star');
-    await this.sleep(700);
+    await this.sleep(600);
     if (!this.scene.isActive('GameScene')) return;
-    if (this.moves > 0) {
-      this.banner(`ОСТАТОК ХОДОВ: ${this.moves} → БОМБЫ!`, '#ffd76a', 21);
-      sfx.play('boost');
-      await this.sleep(650);
-    }
-    let guard = 0;
-    while (this.moves > 0 && guard++ < 30 && this.scene.isActive('GameScene')) {
-      this.moves--;
+
+    // ---------- Минирование: бомбы вылетают быстрой очередью ----------
+    const live: CellPos[] = [];
+    this.grid.forEach((row, r) => row.forEach((f, c) => { if (f) live.push({ r, c }); }));
+    if (!live.length) {
+      this.moves = 0;
       this.updateHUD();
-      await this.detonateRandomBomb();
-      await this.sleep(90);
-    }
-  }
-
-  /** Одна солнечная бомба: выбираем клетку (приоритет реликвиям) и взрываем. */
-  private async detonateRandomBomb(): Promise<void> {
-    const cells: CellPos[] = [];
-    this.grid.forEach((row, r) =>
-      row.forEach((f, c) => {
-        if (f) cells.push({ r, c });
-      }),
-    );
-    if (!cells.length) return;
-    const specials = cells.filter(({ r, c }) => this.grid[r][c]?.special);
-    const pick =
-      specials.length && Math.random() < 0.75
-        ? specials[Math.floor(Math.random() * specials.length)]
-        : cells[Math.floor(Math.random() * cells.length)];
-    const { x, y } = this.gemXY(pick.r, pick.c);
-
-    const bomb = this.add.image(x, y, 'megabomb').setScale(0.05).setDepth(22);
-    sfx.play('swap');
-    this.tweens.add({ targets: bomb, scale: 0.72, duration: 170, ease: 'Back.easeOut' });
-    this.floatText(x, y - 48, 'БОНУС!', '#ffd76a', 15);
-    await this.sleep(220);
-    if (!this.scene.isActive('GameScene')) {
-      bomb.destroy();
       return;
     }
-    const wave = this.collectBlastRemoval(pick.r, pick.c);
-    bomb.destroy();
-    this.cameras.main.shake(150, 0.006);
+    Phaser.Utils.Array.Shuffle(live);
+    const specials = live.filter((p) => this.grid[p.r][p.c]?.special);
+    const count = Math.min(total, live.length);
+    const targets: CellPos[] = [];
+    for (const s of specials) if (targets.length < count) targets.push(s);
+    for (const p of live) {
+      if (targets.length >= count) break;
+      if (!targets.some((t) => t.r === p.r && t.c === p.c)) targets.push(p);
+    }
+
+    this.banner(`МИНИРУЕМ ПОЛЕ: ${total} БОМБ!`, '#ffd76a', 20);
     sfx.play('boost');
+    const step = Phaser.Math.Clamp(850 / targets.length, 26, 90);
+    const bombs: Phaser.GameObjects.Image[] = [];
+    for (let i = 0; i < targets.length; i++) {
+      const { x, y } = this.gemXY(targets[i].r, targets[i].c);
+      const bomb = this.add.image(x, y, 'megabomb').setScale(0.05).setDepth(22);
+      bombs.push(bomb);
+      this.tweens.add({ targets: bomb, scale: 0.58, duration: 120, ease: 'Back.easeOut' });
+      sfx.play('tap');
+      // счётчик ходов сгорает синхронно с установкой бомб
+      this.moves = Math.max(0, total - Math.round(((i + 1) / targets.length) * total));
+      this.updateHUD();
+      await this.sleep(step);
+      if (!this.scene.isActive('GameScene')) return;
+    }
+    this.moves = 0;
+    this.updateHUD();
+
+    // ---------- Фитиль: всё мигает — и одновременный подрыв ----------
+    this.banner('ПОДРЫВ!', '#ff8a5a', 32);
+    this.tweens.add({ targets: bombs, scale: 0.74, duration: 110, yoyo: true, ease: 'Sine.easeInOut' });
+    await this.sleep(330);
+    if (!this.scene.isActive('GameScene')) return;
+
+    // объединяем все зоны 3×3 в одну волну (+ общие цепные детонации реликвий)
+    const removed = new Set<string>();
+    for (const t of targets) {
+      for (let r = t.r - 1; r <= t.r + 1; r++) {
+        for (let c = t.c - 1; c <= t.c + 1; c++) {
+          if (r >= 0 && r < ROWS && c >= 0 && c < COLS && this.grid[r][c]) removed.add(`${r},${c}`);
+        }
+      }
+    }
+    const detonations = this.expandSpecials(removed);
+
+    bombs.forEach((b) => {
+      const em = this.add
+        .particles(b.x, b.y, 'spark', {
+          speed: { min: 120, max: 430 },
+          scale: { start: 0.8, end: 0 },
+          lifespan: 560,
+          tint: [0xffd76a, 0xff8a5a, 0xfff2c9],
+          gravityY: 230,
+          emitting: false,
+        })
+        .setDepth(23);
+      em.explode(10);
+      this.time.delayedCall(700, () => em.destroy());
+      this.tweens.add({
+        targets: b, scale: 1.6, alpha: 0, duration: 220, ease: 'Quad.easeOut',
+        onComplete: () => b.destroy(),
+      });
+    });
+    this.cameras.main.shake(340, 0.014);
+    this.cameras.main.flash(260, 255, 210, 130);
+    sfx.play('boost');
+    sfx.play('stone');
+    sfx.vibrate('heavy');
+
+    const wave: Wave = { removed, spawns: [], detonations };
     await this.popWave(wave, [], 1);
     if (!this.scene.isActive('GameScene')) return;
     await this.collapse();

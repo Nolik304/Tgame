@@ -88,12 +88,14 @@ export class UIScene extends Phaser.Scene {
     this.events.on('toast', this.toast, this);
     this.events.on('hud', this.setHudVisible, this);
     this.events.on('coinFly', this.flyCoins, this);
+    this.events.on('openTotem', this.openTotemModal, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.events.off('openLevel', this.openLevelModal, this);
       this.events.off('openChest', this.openChestModal, this);
       this.events.off('toast', this.toast, this);
       this.events.off('hud', this.setHudVisible, this);
       this.events.off('coinFly', this.flyCoins, this);
+      this.events.off('openTotem', this.openTotemModal, this);
       this.unsub?.();
     });
 
