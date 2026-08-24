@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#050f0a" />
+    <title>Лестница Бога — три в ряд</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Russo+One&family=Rubik:wght@400;500;700;900&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      html,
+      body,
+      #root {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: #050f0a;
+        overscroll-behavior: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- Диагностика загрузки: показывает реальную ошибку вместо безликого «Перезагрузить» в ВК -->
+    <div
+      id="boot-error"
+      style="
+        position: fixed;
+        top: 8px;
+        left: 8px;
+        right: 8px;
+        z-index: 99999;
+        display: none;
+        padding: 10px 12px;
+        background: rgba(140, 20, 20, 0.95);
+        color: #ffe9e0;
+        font: 12px/1.4 monospace;
+        border-radius: 8px;
+        word-break: break-word;
+      "
+    ></div>
+    <script>
+      (function () {
+        function show(msg) {
+          var el = document.getElementById('boot-error');
+          if (!el) return;
+          el.style.display = 'block';
+          el.textContent = msg;
+        }
+        window.addEventListener('error', function (e) {
+          show('Ошибка: ' + (e.message || 'unknown') + ' @ ' + (e.filename || '?') + ':' + (e.lineno || '?'));
+        });
+        window.addEventListener('unhandledrejection', function (e) {
+          var r = e.reason;
+          show('Ошибка: ' + (r && r.message ? r.message : String(r)));
+        });
+      })();
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

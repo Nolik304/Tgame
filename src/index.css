@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+  background: #050f0a;
+  font-family: "Rubik", "Segoe UI", sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+canvas {
+  display: block;
+  outline: none;
+}
+
+.font-display {
+  font-family: "Russo One", "Rubik", sans-serif;
+}
+
+/* Многослойный амбиентный фон «ночные джунгли» вокруг канваса */
+.jungle-bg {
+  background:
+    radial-gradient(120% 70% at 50% -10%, rgba(245, 181, 46, 0.1), rgba(245, 181, 46, 0) 55%),
+    radial-gradient(90% 60% at 12% 108%, rgba(46, 230, 168, 0.1), rgba(46, 230, 168, 0) 55%),
+    radial-gradient(90% 60% at 88% 108%, rgba(53, 208, 192, 0.08), rgba(53, 208, 192, 0) 55%),
+    radial-gradient(140% 100% at 50% 50%, #0a2113 0%, #07160f 55%, #04100a 100%);
+}
+
+.jungle-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    115deg,
+    rgba(245, 181, 46, 0.022) 0px,
+    rgba(245, 181, 46, 0.022) 2px,
+    rgba(0, 0, 0, 0) 2px,
+    rgba(0, 0, 0, 0) 26px
+  );
+  mix-blend-mode: screen;
+}
+
+.side-runes {
+  writing-mode: vertical-rl;
+  letter-spacing: 0.5em;
+  animation: rune-drift 14s ease-in-out infinite alternate;
+}
+
+@keyframes rune-drift {
+  from {
+    transform: translateY(-10px);
+    opacity: 0.35;
+  }
+  to {
+    transform: translateY(10px);
+    opacity: 0.65;
+  }
+}
