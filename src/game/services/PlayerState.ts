@@ -13,7 +13,6 @@ import {
   getEventStage,
 } from '../data/gameData';
 import {
-  BONUS_UPGRADES,
   TOTEM_SAVE_DEFAULT,
   UPGRADE_COST,
   UPGRADE_RATE,
@@ -321,7 +320,7 @@ class PlayerState {
    */
   tryUpgradeTotem(
     id: TotemId,
-    upgradeId: string, // 'crit' (уровень крита) или id бонус-улучшения
+    track: 'proc' | 'power', // ШАНС или СИЛА
     currency: 'gems' | 'coins',
   ): { success: boolean; affordable: boolean } {
     const totem = this.data.totems[id];
@@ -339,19 +338,11 @@ class PlayerState {
 
     const roll = Math.random() < rate;
     if (roll) {
-      if (upgradeId === 'crit') {
-        totem.level = Math.min(10, totem.level + 1);
-      } else if (BONUS_UPGRADES[id].some((u) => u.id === upgradeId) && !totem.unlocked.includes(upgradeId)) {
-        totem.unlocked.push(upgradeId);
-      }
+      totem[track] = Math.min(10, totem[track] + 1);
     }
     this.save();
     this.emit();
     return { success: roll, affordable: true };
-  }
-
-  hasBonus(id: TotemId, upgradeId: string): boolean {
-    return this.data.totems[id].unlocked.includes(upgradeId);
   }
 
   // ---------- Профиль / настройки ----------

@@ -45,7 +45,7 @@ export const ERAS: EraDef[] = [
     era: 1, from: 1, to: 100,
     title: 'СТУПЕНИ РАССВЕТА', numeral: 'I',
     gemCount: 5, bossEvery: 25, bossFreezeEvery: 5, bossFreezeCount: 3,
-    vinesFrom: 8, slabsFrom: 45, iceFrom: 0, relicFrom: 12, duoFrom: 0,
+    vinesFrom: 3, slabsFrom: 16, iceFrom: 0, relicFrom: 10, duoFrom: 0,
     mechanicText: 'Поднимись на 100 ступеней — впереди Лунная Терраса!',
   },
   {
@@ -82,6 +82,24 @@ export function eraOf(id: number): EraDef {
   for (const e of ERAS) if (id >= e.from && id <= e.to) return e;
   return ERAS[ERAS.length - 1]; // 500+ — формулы продолжают работать
 }
+
+// ============================================================
+// НАСТРОЙКА СЛОЖНОСТИ — крути эти числа, чтобы менять баланс.
+//   movesStart/movesMin — диапазон выдаваемых ходов;
+//   collectPerMove      — сколько кристаллов цели нужно СДАВАТЬ за ход
+//                         (чем выше, тем меньше лишних ходов остаётся);
+//   scorePerMove        — требуемых очков за ход;
+//   obstacleDensity     — множитель количества препятствий.
+// ============================================================
+export const DIFFICULTY = {
+  movesStart: 16,
+  movesMin: 11,
+  collectPerMove: 1.45, // база: цель ≈ ходы × это значение
+  collectPerMoveMax: 2.15,
+  scorePerMove: 108,
+  scorePerMoveMax: 160,
+  obstacleDensity: 1.0,
+};
 
 // ---------- Детерминированный RNG (mulberry32) ----------
 function rng(seed: number): () => number {
@@ -129,18 +147,33 @@ function generateLevel(id: number): LevelDef {
   const kinds = FRUIT_KINDS.slice(0, era.gemCount);
   const isBoss = id % era.bossEvery === 0;
 
-  // ----- цель -----
+  // ----- кривая сложности (0→1): быстрый рост в начале, плавный дальше -----
+  const ramp = Math.min(1, id / 250);
+  const earlyRamp = Math.min(1, id / 60);
+
+  // ----- ходы: щедро только на первых трёх ступенях, дальше в обрез -----
+  let moves: number;
+  if (id <= 3) moves = 18; // онбординг
+  else moves = Math.round(DIFFICULTY.movesStart - earlyRamp * 3 - Math.max(0, Math.min(1, (id - 60) / 240)) * 2);
+  moves = Math.max(DIFFICULTY.movesMin, moves - Math.floor((era.era - 1) / 2));
+  if (isBoss) moves = Math.max(15, moves + 3); // у боссов заморозка — даём запас
+
+  // «сколько цели за ход» — растёт с уровнем: лишних ходов почти не остаётся
+  const cpm = DIFFICULTY.collectPerMove + ramp * (DIFFICULTY.collectPerMoveMax - DIFFICULTY.collectPerMove);
+  const spm = DIFFICULTY.scorePerMove + ramp * (DIFFICULTY.scorePerMoveMax - DIFFICULTY.scorePerMove);
+
+  // ----- цель (привязана к числу ходов, чтобы была впритык) -----
   let goal: GoalDef;
   if (isBoss) {
     const kind = kinds[Math.floor(r() * kinds.length)];
-    goal = { type: 'collect', kind, amount: Math.min(40, 14 + era.era * 3 + Math.floor(id * 0.02)) };
+    goal = { type: 'collect', kind, amount: Math.min(42, Math.round(moves * (cpm - 0.25))) };
   } else if (id >= era.relicFrom && id % 9 === 5) {
     goal = { type: 'relic', amount: 2 + (era.era >= 3 ? 1 : 0) };
   } else if (id >= era.duoFrom && r() < 0.45) {
     const a = kinds[Math.floor(r() * kinds.length)];
     let b = kinds[Math.floor(r() * kinds.length)];
     if (b === a) b = kinds[(kinds.indexOf(a) + 1 + Math.floor(r() * (kinds.length - 1))) % kinds.length];
-    const base = Math.min(26, 9 + Math.floor(id * 0.02));
+    const base = Math.round(moves * cpm * 0.62);
     goal = {
       type: 'duo',
       parts: [
@@ -148,14 +181,14 @@ function generateLevel(id: number): LevelDef {
         { kind: b, amount: Math.max(8, base - 2) },
       ],
     };
-  } else if (r() < 0.62) {
+  } else if (r() < 0.6) {
     const kind = kinds[Math.floor(r() * kinds.length)];
-    goal = { type: 'collect', kind, amount: Math.min(30, 10 + Math.floor(id * 0.035)) };
+    goal = { type: 'collect', kind, amount: Math.min(44, Math.round(moves * cpm)) };
   } else {
-    goal = { type: 'score', amount: 1000 + Math.floor(id * 8.5) };
+    goal = { type: 'score', amount: Math.round(moves * spm) };
   }
 
-  // ----- препятствия -----
+  // ----- препятствия (раньше и плотнее) -----
   const obstacles: ObstacleLayout = {};
   const addCells = (n: number, avoid: Set<string>): [number, number][] => {
     const cells: [number, number][] = [];
@@ -171,9 +204,10 @@ function generateLevel(id: number): LevelDef {
     return cells;
   };
   const used = new Set<string>();
-  const vineN = id >= era.vinesFrom ? Math.min(6, 1 + Math.floor((id - era.vinesFrom) / 28) + (r() < 0.4 ? 1 : 0)) : 0;
-  const slabN = id >= era.slabsFrom ? Math.min(4, 1 + Math.floor((id - era.slabsFrom) / 60) + (r() < 0.3 ? 1 : 0)) : 0;
-  const iceN = id >= era.iceFrom ? Math.min(5, 1 + Math.floor((id - era.iceFrom) / 35) + (r() < 0.35 ? 1 : 0)) : 0;
+  const den = DIFFICULTY.obstacleDensity;
+  const vineN = id >= era.vinesFrom ? Math.min(6, Math.round((1 + Math.floor((id - era.vinesFrom) / 18) + (r() < 0.4 ? 1 : 0)) * den)) : 0;
+  const slabN = id >= era.slabsFrom ? Math.min(4, Math.round((1 + Math.floor((id - era.slabsFrom) / 45) + (r() < 0.3 ? 1 : 0)) * den)) : 0;
+  const iceN = id >= era.iceFrom ? Math.min(5, Math.round((1 + Math.floor((id - era.iceFrom) / 35) + (r() < 0.35 ? 1 : 0)) * den)) : 0;
   if (isBoss) {
     // у боссов чище поле — только лёгкие препятствия
     if (vineN > 0) obstacles.vines = addCells(Math.min(2, vineN), used);
@@ -183,10 +217,7 @@ function generateLevel(id: number): LevelDef {
     if (iceN > 0) obstacles.ice = addCells(iceN, used);
   }
 
-  // ----- ходы / очки / награды -----
-  let moves: number;
-  if (isBoss) moves = 24;
-  else moves = Math.max(14, 19 - Math.floor(era.era / 2) - Math.floor(id / 160));
+  // ----- бонус ходов за сложные цели -----
   if (goal.type === 'relic') moves += 4;
   if (goal.type === 'duo') moves += 3;
 

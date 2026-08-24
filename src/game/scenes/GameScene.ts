@@ -24,7 +24,7 @@ import {
   type LevelDef,
   type FruitKind,
 } from '../data/gameData';
-import { TOTEMS, totemStats, type TotemDef } from '../data/TotemSystem';
+import { TOTEMS, totemStats, PROC_CRIT_CHANCE, type TotemDef, type TotemId } from '../data/TotemSystem';
 import { getLevel, goalText as goalLabel } from '../data/LevelFactory';
 import { playerState } from '../services/PlayerState';
 import { sfx } from '../services/SoundManager';
@@ -89,10 +89,8 @@ interface SkillButton {
   x: number;
   y: number;
   icon: Phaser.GameObjects.Image;
-  ring: Phaser.GameObjects.Graphics;
-  glow: Phaser.GameObjects.Image;
-  count: Phaser.GameObjects.Text;
-  pulse?: Phaser.Tweens.Tween;
+  proc: Phaser.GameObjects.Text;
+  flash: Phaser.GameObjects.Image;
 }
 
 export class GameScene extends Phaser.Scene {
@@ -121,12 +119,8 @@ export class GameScene extends Phaser.Scene {
   private obstacles: ObstacleObj[] = [];
   private idols: IdolObj[] = [];
 
-  // навыки
-  private skillCharge: Record<string, number> = {};
+  // тотемы (пассивные)
   private skillButtons: SkillButton[] = [];
-  private aimSkill: TotemDef | null = null;
-  private aimRing?: Phaser.GameObjects.Image;
-  private aimBanner?: Phaser.GameObjects.Text;
 
   // HUD
   private movesText!: Phaser.GameObjects.Text;
@@ -173,10 +167,7 @@ export class GameScene extends Phaser.Scene {
     this.selected = null;
     this.downFruit = null;
     this.lifeLost = false;
-    this.skillCharge = {};
-    TOTEMS.forEach((s) => (this.skillCharge[s.id] = 0));
     this.skillButtons = [];
-    this.aimSkill = null;
     this.obstacles = [];
     this.idols = [];
     this.bossMax = this.level.goal.type === 'collect' ? this.level.goal.amount : 1;
@@ -360,225 +351,134 @@ export class GameScene extends Phaser.Scene {
   // ---------------- Боевые навыки ----------------
 
   private buildSkillHUD(hud: Phaser.GameObjects.Container): void {
-    const baseY = 878;
+    const baseY = 880;
     TOTEMS.forEach((def, i) => {
-      const x = GAME_W / 2 + (i - 1) * 118;
+      const x = GAME_W / 2 + (i - 1) * 130;
       const y = baseY;
 
-      const glow = this.add.image(x, y, 'glow').setTint(0xffd76a).setScale(1.05).setAlpha(0).setDepth(29);
+      const flash = this.add.image(x, y, 'glow').setTint(def.color).setScale(1.3).setAlpha(0).setDepth(29);
       const bg = this.add.graphics().setDepth(30);
       bg.fillStyle(0x0b2417, 1);
-      bg.fillCircle(x, y, 36);
-      bg.lineStyle(3, 0x2c5a40, 1);
-      bg.strokeCircle(x, y, 35);
+      bg.fillCircle(x, y, 34);
+      bg.lineStyle(3, def.color, 0.6);
+      bg.strokeCircle(x, y, 33);
 
-      const icon = this.add.image(x, y, def.icon).setScale(0.72).setDepth(31).setAlpha(0.9);
-      const ring = this.add.graphics().setDepth(32).setPosition(x, y);
-      const count = this.add.text(x, y + 50, `0/${def.charge}`, {
+      const icon = this.add.image(x, y, def.icon).setScale(0.62).setDepth(31).setAlpha(0.95);
+      const proc = this.add.text(x, y + 48, '—', {
         fontFamily: RUSSO, fontSize: '12px', color: '#9db39a',
       }).setOrigin(0.5).setDepth(32);
 
       const hit = this.add.circle(x, y, 40, 0x000000, 0).setInteractive({ useHandCursor: true }).setDepth(33);
-      hit.on('pointerup', () => this.onSkillTap(def));
-      hit.on('pointerover', () => icon.setScale(0.8));
-      hit.on('pointerout', () => icon.setScale(0.72));
+      hit.on('pointerup', () => this.scene.get('UIScene')?.events.emit('openTotem', def.id));
+      hit.on('pointerover', () => icon.setScale(0.7));
+      hit.on('pointerout', () => icon.setScale(0.62));
 
-      hud.add([glow, bg, icon, ring, count]);
-      this.skillButtons.push({ def, x, y, icon, ring, glow, count });
+      hud.add([flash, bg, icon, proc]);
+      this.skillButtons.push({ def, x, y, icon, proc, flash });
     });
     hud.add(
-      this.add.text(GAME_W / 2, 944, 'Тотемы: Пламя — рубины, Гроза — топазы, Дар — любые матчи', {
+      this.add.text(GAME_W / 2, 946, 'Тотемы срабатывают сами — прокачивай ШАНС и СИЛУ', {
         fontFamily: RUBIK, fontSize: '11px', color: '#5f7a66',
       }).setOrigin(0.5),
     );
+    this.updateTotemHUD();
   }
 
-  private chargeSkill(kind: FruitKind, n: number): void {
-    const def = TOTEMS.find((s) => s.kind === kind);
-    if (!def) return;
-    this.addCharge(def, n);
-  }
-
-  /** Зелёный тотем заряжается от любых матчей (по числу совпавших групп). */
-  private chargeGreen(groups: number): void {
-    const def = TOTEMS.find((s) => s.id === 'green');
-    if (def) this.addCharge(def, groups);
-  }
-
-  private addCharge(def: TotemDef, n: number): void {
-    const cur = this.skillCharge[def.id] ?? 0;
-    if (cur >= def.charge) return;
-    const next = Math.min(def.charge, cur + n);
-    this.skillCharge[def.id] = next;
-    this.updateSkillHUD();
-    if (next >= def.charge) {
-      const btn = this.skillButtons.find((b) => b.def.id === def.id);
-      if (btn) {
-        sfx.play('boost');
-        sfx.vibrate('medium');
-        this.floatText(btn.x, btn.y - 60, 'НАВЫК ГОТОВ!', '#ffd76a', 16);
-        if (!btn.pulse) {
-          btn.pulse = this.tweens.add({
-            targets: btn.icon,
-            scale: { from: 0.72, to: 0.84 },
-            duration: 420,
-            yoyo: true,
-            repeat: -1,
-            ease: 'Sine.easeInOut',
-          });
-        }
-      }
-    }
-  }
-
-  private updateSkillHUD(): void {
+  /** Обновляет подписи шансов под кнопками тотемов. */
+  private updateTotemHUD(): void {
     for (const btn of this.skillButtons) {
-      const ch = this.skillCharge[btn.def.id] ?? 0;
-      const frac = Math.min(1, ch / btn.def.charge);
-      const full = frac >= 1;
-      btn.ring.clear();
-      if (frac > 0.02) {
-        btn.ring.lineStyle(5, full ? 0xffd76a : btn.def.color, full ? 1 : 0.85);
-        btn.ring.beginPath();
-        btn.ring.arc(0, 0, 40, -90, -90 + 360 * frac);
-        btn.ring.strokePath();
+      const st = totemStats(btn.def.id, playerState.data.totems[btn.def.id]);
+      btn.proc.setText(st.proc > 0 ? `${st.proc}%` : '—');
+      btn.proc.setColor(st.proc > 0 ? '#ffd76a' : '#5f7a66');
+    }
+  }
+
+  /**
+   * Пассивные тотемы: после каждого матча каждый тотем бросает свой шанс
+   * и при успехе автоматически активирует эффект. Один залп за ход.
+   */
+  private async maybeProcTotems(): Promise<void> {
+    let fired = false;
+    for (const def of TOTEMS) {
+      const st = totemStats(def.id, playerState.data.totems[def.id]);
+      if (st.proc <= 0) continue;
+      if (Math.random() * 100 < st.proc) {
+        this.flashTotem(def.id);
+        await this.fireTotem(def, st);
+        fired = true;
+        if (!this.scene.isActive('GameScene')) return;
       }
-      btn.glow.setAlpha(full ? 0.85 : 0);
-      btn.count.setText(full ? 'ЖМИ!' : `${ch}/${btn.def.charge}`);
-      btn.count.setColor(full ? '#ffd76a' : '#9db39a');
     }
-  }
-
-  private onSkillTap(def: TotemDef): void {
-    if (this.overlayOpen) return;
-    if (this.aimSkill?.id === def.id) {
-      this.cancelAim();
-      return;
-    }
-    const ch = this.skillCharge[def.id] ?? 0;
-    if (ch < def.charge || this.locked) {
-      sfx.play('invalid');
-      const btn = this.skillButtons.find((b) => b.def.id === def.id);
-      if (btn) {
-        const hint = def.kind ? `Собирай: ${FRUIT_NAMES[def.kind]}` : 'Собирай любые матчи';
-        this.floatText(btn.x, btn.y - 58, hint, '#ff9a86', 13);
-        this.tweens.add({ targets: btn.icon, x: '-=5', duration: 45, yoyo: true, repeat: 3 });
-      }
-      return;
-    }
-    // «Дар ступеней» срабатывает сразу, остальные — через прицеливание
-    if (def.effect === 'moves') {
-      void this.activateSkill(def, null);
-    } else {
-      this.enterAim(def);
-    }
-  }
-
-  private enterAim(def: TotemDef): void {
-    this.aimSkill = def;
-    sfx.play('tap');
-    if (!this.aimBanner) {
-      this.aimBanner = this.add.text(GAME_W / 2, 226, '', {
-        fontFamily: RUSSO, fontSize: '18px', color: '#9dffce',
-        stroke: '#06281a', strokeThickness: 5,
-      }).setOrigin(0.5).setDepth(45);
-    }
-    this.aimBanner.setText(`${def.name}: выбери цель!`).setVisible(true).setAlpha(1);
-    this.tweens.killTweensOf(this.aimBanner);
-    this.tweens.add({ targets: this.aimBanner, alpha: { from: 1, to: 0.55 }, duration: 380, yoyo: true, repeat: -1 });
-    if (!this.aimRing) {
-      this.aimRing = this.add.image(GAME_W / 2, BOARD_Y + 4 * CELL, 'ring').setScale(0.75).setTint(0x9dffce).setDepth(15);
-    }
-    this.aimRing.setVisible(true);
-  }
-
-  private cancelAim(): void {
-    this.aimSkill = null;
-    this.aimBanner?.setVisible(false);
-    this.aimRing?.setVisible(false);
-  }
-
-  private async activateSkill(def: TotemDef, target: CellPos | null): Promise<void> {
-    if (this.locked) return;
-    this.locked = true;
-    this.cancelAim();
-    this.resetHintTimer();
-    this.skillCharge[def.id] = 0;
-    this.updateSkillHUD();
-    const btn = this.skillButtons.find((b) => b.def.id === def.id);
-    if (btn?.pulse) {
-      btn.pulse.stop();
-      btn.pulse = undefined;
-      btn.icon.setScale(0.72);
-    }
-    sfx.play('boost');
-    sfx.vibrate('heavy');
-    this.cameras.main.flash(220, 255, 240, 180);
-    this.cameras.main.shake(240, 0.007);
-
-    const stats = totemStats(def.id, playerState.data.totems[def.id]);
-    const isCrit = Math.random() * 100 < stats.crit;
-
-    // ---------- Зелёный тотем: дополнительные ходы ----------
-    if (def.effect === 'moves') {
-      const gainedMoves = isCrit ? stats.moves + 2 : stats.moves;
-      this.moves += gainedMoves;
-      this.updateHUD();
-      this.floatText(GAME_W / 2, 430, isCrit ? `КРИТ! +${gainedMoves} ХОДОВ!` : `+${gainedMoves} ХОДА`, '#4ae07a', 24);
-      this.score += isCrit ? 150 : 60;
-      this.updateHUD();
-      await this.sleep(350);
+    if (fired) {
+      await this.collapse();
       if (!this.scene.isActive('GameScene')) return;
-      this.locked = false;
-      this.resetHintTimer();
+      await this.cascadeLoop();
+    }
+  }
+
+  private flashTotem(id: TotemId): void {
+    const btn = this.skillButtons.find((b) => b.def.id === id);
+    if (!btn) return;
+    this.tweens.add({ targets: btn.flash, alpha: { from: 0.9, to: 0 }, duration: 500, ease: 'Quad.easeOut' });
+    this.tweens.add({ targets: btn.icon, scale: { from: 0.85, to: 0.62 }, duration: 300, ease: 'Back.easeOut' });
+  }
+
+  /** Авто-активация эффекта тотема (цель выбирается автоматически). */
+  private async fireTotem(def: TotemDef, st: ReturnType<typeof totemStats>): Promise<void> {
+    const isCrit = Math.random() * 100 < PROC_CRIT_CHANCE;
+    sfx.play('boost');
+    sfx.vibrate('medium');
+
+    // Зелёный: дополнительные ходы
+    if (def.id === 'green') {
+      const gained = isCrit ? st.moves + 2 : st.moves;
+      this.moves += gained;
+      this.score += isCrit ? 120 : 50;
+      this.floatText(GAME_W / 2, 430, isCrit ? `ДАР! КРИТ +${gained} ХОДОВ!` : `ДАР СТУПЕНЕЙ +${gained}`, '#4ae07a', 22);
+      this.updateHUD();
       return;
     }
 
-    if (!target) {
-      this.locked = false;
-      return;
-    }
-
+    // Собираем живые клетки
     const cells: CellPos[] = [];
-    if (def.effect === 'blast') {
-      // Красный тотем: взрыв 3×3 / 4×4 (прокачка), крит и двойной снаряд
-      const half = Math.floor(stats.radius / 2);
-      const blastAt = (cr: number, cc: number) => {
-        for (let r = cr - half; r <= cr - half + stats.radius - 1; r++) {
-          for (let c = cc - half; c <= cc - half + stats.radius - 1; c++) {
-            if (r >= 0 && r < ROWS && c >= 0 && c < COLS) {
-              if (this.grid[r][c] && !cells.some((p) => p.r === r && p.c === c)) cells.push({ r, c });
-              this.damageObstacle(r, c, 2);
-            }
+    const alive: CellPos[] = [];
+    this.grid.forEach((row, r) => row.forEach((f, c) => { if (f) alive.push({ r, c }); }));
+    if (!alive.length) return;
+
+    if (def.id === 'red') {
+      const t = alive[Math.floor(Math.random() * alive.length)];
+      const half = Math.floor(st.radius / 2);
+      const add = (cr: number, cc: number) => {
+        for (let r = cr - half; r < cr - half + st.radius; r++) {
+          for (let c = cc - half; c < cc - half + st.radius; c++) {
+            if (r >= 0 && r < ROWS && c >= 0 && c < COLS && this.grid[r][c] &&
+                !cells.some((p) => p.r === r && p.c === c)) cells.push({ r, c });
           }
         }
       };
-      blastAt(target.r, target.c);
-      if (stats.extraBall > 0 && Math.random() * 100 < stats.extraBall) {
-        blastAt(
-          Phaser.Math.Clamp(target.r + Phaser.Math.Between(-2, 2), 0, ROWS - 1),
-          Phaser.Math.Clamp(target.c + Phaser.Math.Between(-2, 2), 0, COLS - 1),
-        );
-        this.floatText(GAME_W / 2, 380, 'ДВОЙНОЙ СНАРЯД!', '#ffb35a', 18);
+      add(t.r, t.c);
+      if (st.extraBall > 0 && Math.random() * 100 < st.extraBall) {
+        const t2 = alive[Math.floor(Math.random() * alive.length)];
+        add(t2.r, t2.c);
       }
-      const p = this.gemXY(target.r, target.c);
-      this.floatText(p.x, p.y - 20, isCrit ? 'ПЛАМЯ! КРИТ!' : 'ПЛАМЯ БОГОВ!', '#ffb35a', 22);
-    } else if (def.effect === 'chain') {
-      // Синий тотем: цепная молния по N ближайшим фишкам (крит — цепь x2)
-      const want = isCrit ? stats.chain * 2 : stats.chain;
-      const candidates: { r: number; c: number; d: number }[] = [];
-      for (let r = 0; r < ROWS; r++) {
-        for (let c = 0; c < COLS; c++) {
-          if (!this.grid[r][c]) continue;
-          candidates.push({ r, c, d: Math.abs(r - target.r) + Math.abs(c - target.c) });
-        }
-      }
-      candidates.sort((a, b) => a.d - b.d);
-      for (const cand of candidates.slice(0, want)) cells.push({ r: cand.r, c: cand.c });
-      const p = this.gemXY(target.r, target.c);
-      this.floatText(p.x, p.y - 20, isCrit ? 'ГРОЗА! КРИТ!' : 'ЦЕПНАЯ ГРОЗА!', '#7ec8ff', 22);
+      this.floatText(GAME_W / 2, 430, isCrit ? 'ПЛАМЯ! КРИТ!' : 'ПЛАМЯ БОГОВ!', '#ff8a5a', 22);
+    } else {
+      // синий: цепная молния от случайной фишки
+      const t = alive[Math.floor(Math.random() * alive.length)];
+      const want = isCrit ? st.chain * 2 : st.chain;
+      const cand = alive
+        .map((p) => ({ ...p, d: Math.abs(p.r - t.r) + Math.abs(p.c - t.c) }))
+        .sort((a, b) => a.d - b.d)
+        .slice(0, want);
+      for (const p of cand) cells.push({ r: p.r, c: p.c });
+      this.floatText(GAME_W / 2, 430, isCrit ? 'ГРОЗА! КРИТ!' : 'ЦЕПНАЯ ГРОЗА!', '#7ec8ff', 22);
     }
 
+    this.removeFruitCells(cells, def.id === 'blue' ? 0x9edcff : undefined, isCrit);
+  }
+
+  /** Удаляет фишки в клетках: частицы, очки, прогресс цели. */
+  private removeFruitCells(cells: CellPos[], tint?: number, isCrit = false): void {
     let gained = 0;
     for (const { r, c } of cells) {
       const fruit = this.grid[r][c];
@@ -594,7 +494,7 @@ export class GameScene extends Phaser.Scene {
         speed: { min: 80, max: 300 },
         scale: { start: 0.5, end: 0 },
         lifespan: 420,
-        tint: def.effect === 'chain' ? 0x9edcff : FRUIT_COLORS[fruit.kind].light,
+        tint: tint ?? FRUIT_COLORS[fruit.kind].light,
         gravityY: 160,
         emitting: false,
       }).setDepth(20);
@@ -604,11 +504,8 @@ export class GameScene extends Phaser.Scene {
       if (fruit.aura) fruit.aura.destroy();
       this.tweens.add({
         targets: fruit.sprite,
-        scale: 0.9,
-        alpha: 0,
-        angle: 0,
-        duration: 160,
-        ease: 'Quad.easeIn',
+        scale: 0.9, alpha: 0,
+        duration: 160, ease: 'Quad.easeIn',
         onComplete: () => fruit.sprite.destroy(),
       });
     }
@@ -616,11 +513,6 @@ export class GameScene extends Phaser.Scene {
     this.score += gained;
     if (gained) this.floatText(GAME_W / 2, 500, `+${gained}`, isCrit ? '#ff9a86' : '#ffd76a', 18);
     this.updateHUD();
-    await this.sleep(210);
-    if (!this.scene.isActive('GameScene')) return;
-    await this.collapse();
-    await this.cascadeLoop();
-    await this.finishTurn();
   }
 
   private bumpBoss(): void {
@@ -994,7 +886,7 @@ export class GameScene extends Phaser.Scene {
 
   private buildInput(): void {
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
-      if (this.locked || this.aimSkill) return;
+      if (this.locked) return;
       this.downX = p.x;
       this.downY = p.y;
       this.downFruit = this.fruitAt(p.x, p.y);
@@ -1002,12 +894,6 @@ export class GameScene extends Phaser.Scene {
       this.resetHintTimer();
     });
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
-      if (this.aimSkill) {
-        const cx = Phaser.Math.Clamp(p.x, BOARD_X, BOARD_X + COLS * CELL);
-        const cy = Phaser.Math.Clamp(p.y, BOARD_Y, BOARD_Y + ROWS * CELL);
-        this.aimRing?.setPosition(cx, cy);
-        return;
-      }
       if (this.locked || !this.downFruit || this.dragged) return;
       const dx = p.x - this.downX;
       const dy = p.y - this.downY;
@@ -1024,21 +910,6 @@ export class GameScene extends Phaser.Scene {
       if (target) void this.trySwap(src, target);
     });
     this.input.on('pointerup', (p: Phaser.Input.Pointer) => {
-      if (this.aimSkill) {
-        const c = Math.floor((p.x - BOARD_X) / CELL);
-        const r = Math.floor((p.y - BOARD_Y) / CELL);
-        const inBoard = r >= 0 && r < ROWS && c >= 0 && c < COLS;
-        const onSkills = p.y > 830;
-        if (inBoard && !onSkills) {
-          const def = this.aimSkill;
-          this.aimSkill = null;
-          void this.activateSkill(def, { r, c });
-        } else if (!onSkills) {
-          this.cancelAim();
-          sfx.play('tap');
-        }
-        return;
-      }
       if (this.locked || this.dragged) {
         this.downFruit = null;
         return;
@@ -1166,6 +1037,9 @@ export class GameScene extends Phaser.Scene {
     this.moves--;
     this.updateHUD();
     await this.cascadeLoop();
+    if (!this.scene.isActive('GameScene')) return;
+    // пассивные тотемы бросают свой шанс после каждого матча
+    await this.maybeProcTotems();
     await this.finishTurn();
   }
 
@@ -1234,62 +1108,99 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Финал уровня в стиле Монтесумы: цель уже выполнена, поэтому каждый
-   * оставшийся ход автоматически превращается в «солнечную бомбу», которая
-   * взрывает 3×3 (с цепными детонациями реликвий) и приносит очки —
-   * так можно дотянуть до 2–3 звёзд.
+   * Финал уровня «минирование»: цель выполнена, все оставшиеся ходы разом
+   * превращаются в бомбы — поле быстро минируется (доли секунды), затем
+   * ОДИН одновременный подрыв всех зон. Очки те же, ожидания никакого.
    */
   private async bonusPhase(): Promise<void> {
-    this.cancelAim();
     this.clearSelection();
     this.hintTimer?.destroy();
+    const total = this.moves;
+    if (total <= 0) return;
     this.banner('ЦЕЛЬ ВЫПОЛНЕНА!', '#9dffce', 27);
     sfx.play('star');
-    await this.sleep(700);
+    await this.sleep(600);
     if (!this.scene.isActive('GameScene')) return;
-    if (this.moves > 0) {
-      this.banner(`ОСТАТОК ХОДОВ: ${this.moves} → БОМБЫ!`, '#ffd76a', 21);
-      sfx.play('boost');
-      await this.sleep(650);
-    }
-    let guard = 0;
-    while (this.moves > 0 && guard++ < 30 && this.scene.isActive('GameScene')) {
-      this.moves--;
+
+    // ---------- Минирование: бомбы вылетают быстрой очередью ----------
+    const live: CellPos[] = [];
+    this.grid.forEach((row, r) => row.forEach((f, c) => { if (f) live.push({ r, c }); }));
+    if (!live.length) {
+      this.moves = 0;
       this.updateHUD();
-      await this.detonateRandomBomb();
-      await this.sleep(90);
-    }
-  }
-
-  /** Одна солнечная бомба: выбираем клетку (приоритет реликвиям) и взрываем. */
-  private async detonateRandomBomb(): Promise<void> {
-    const cells: CellPos[] = [];
-    this.grid.forEach((row, r) =>
-      row.forEach((f, c) => {
-        if (f) cells.push({ r, c });
-      }),
-    );
-    if (!cells.length) return;
-    const specials = cells.filter(({ r, c }) => this.grid[r][c]?.special);
-    const pick =
-      specials.length && Math.random() < 0.75
-        ? specials[Math.floor(Math.random() * specials.length)]
-        : cells[Math.floor(Math.random() * cells.length)];
-    const { x, y } = this.gemXY(pick.r, pick.c);
-
-    const bomb = this.add.image(x, y, 'megabomb').setScale(0.05).setDepth(22);
-    sfx.play('swap');
-    this.tweens.add({ targets: bomb, scale: 0.72, duration: 170, ease: 'Back.easeOut' });
-    this.floatText(x, y - 48, 'БОНУС!', '#ffd76a', 15);
-    await this.sleep(220);
-    if (!this.scene.isActive('GameScene')) {
-      bomb.destroy();
       return;
     }
-    const wave = this.collectBlastRemoval(pick.r, pick.c);
-    bomb.destroy();
-    this.cameras.main.shake(150, 0.006);
+    Phaser.Utils.Array.Shuffle(live);
+    const specials = live.filter((p) => this.grid[p.r][p.c]?.special);
+    const count = Math.min(total, live.length);
+    const targets: CellPos[] = [];
+    for (const s of specials) if (targets.length < count) targets.push(s);
+    for (const p of live) {
+      if (targets.length >= count) break;
+      if (!targets.some((t) => t.r === p.r && t.c === p.c)) targets.push(p);
+    }
+
+    this.banner(`МИНИРУЕМ ПОЛЕ: ${total} БОМБ!`, '#ffd76a', 20);
     sfx.play('boost');
+    const step = Phaser.Math.Clamp(850 / targets.length, 26, 90);
+    const bombs: Phaser.GameObjects.Image[] = [];
+    for (let i = 0; i < targets.length; i++) {
+      const { x, y } = this.gemXY(targets[i].r, targets[i].c);
+      const bomb = this.add.image(x, y, 'megabomb').setScale(0.05).setDepth(22);
+      bombs.push(bomb);
+      this.tweens.add({ targets: bomb, scale: 0.58, duration: 120, ease: 'Back.easeOut' });
+      sfx.play('tap');
+      // счётчик ходов сгорает синхронно с установкой бомб
+      this.moves = Math.max(0, total - Math.round(((i + 1) / targets.length) * total));
+      this.updateHUD();
+      await this.sleep(step);
+      if (!this.scene.isActive('GameScene')) return;
+    }
+    this.moves = 0;
+    this.updateHUD();
+
+    // ---------- Фитиль: всё мигает — и одновременный подрыв ----------
+    this.banner('ПОДРЫВ!', '#ff8a5a', 32);
+    this.tweens.add({ targets: bombs, scale: 0.74, duration: 110, yoyo: true, ease: 'Sine.easeInOut' });
+    await this.sleep(330);
+    if (!this.scene.isActive('GameScene')) return;
+
+    // объединяем все зоны 3×3 в одну волну (+ общие цепные детонации реликвий)
+    const removed = new Set<string>();
+    for (const t of targets) {
+      for (let r = t.r - 1; r <= t.r + 1; r++) {
+        for (let c = t.c - 1; c <= t.c + 1; c++) {
+          if (r >= 0 && r < ROWS && c >= 0 && c < COLS && this.grid[r][c]) removed.add(`${r},${c}`);
+        }
+      }
+    }
+    const detonations = this.expandSpecials(removed);
+
+    bombs.forEach((b) => {
+      const em = this.add
+        .particles(b.x, b.y, 'spark', {
+          speed: { min: 120, max: 430 },
+          scale: { start: 0.8, end: 0 },
+          lifespan: 560,
+          tint: [0xffd76a, 0xff8a5a, 0xfff2c9],
+          gravityY: 230,
+          emitting: false,
+        })
+        .setDepth(23);
+      em.explode(10);
+      this.time.delayedCall(700, () => em.destroy());
+      this.tweens.add({
+        targets: b, scale: 1.6, alpha: 0, duration: 220, ease: 'Quad.easeOut',
+        onComplete: () => b.destroy(),
+      });
+    });
+    this.cameras.main.shake(340, 0.014);
+    this.cameras.main.flash(260, 255, 210, 130);
+    sfx.play('boost');
+    sfx.play('stone');
+    sfx.vibrate('heavy');
+
+    const wave: Wave = { removed, spawns: [], detonations };
     await this.popWave(wave, [], 1);
     if (!this.scene.isActive('GameScene')) return;
     await this.collapse();
@@ -1483,8 +1394,6 @@ export class GameScene extends Phaser.Scene {
     });
     hitObs.forEach((o) => this.damageObstacle(o.r, o.c, 1));
 
-    kindCounts.forEach((cnt, kind) => this.chargeSkill(kind, cnt));
-    this.chargeGreen(groups.length);
     if (counted > 0) {
       this.collected += counted;
       this.bumpBoss();
@@ -2093,7 +2002,6 @@ export class GameScene extends Phaser.Scene {
     if (this.overlayOpen) return;
     this.locked = true;
     this.overlayOpen = true;
-    this.cancelAim();
     const pop = new Popup(this, 400, 430, 'ПАУЗА');
     pop.closable = false;
     const items: Phaser.GameObjects.GameObject[] = [];
@@ -2181,7 +2089,7 @@ export class GameScene extends Phaser.Scene {
         this.add.text(
           0,
           40,
-          `Тотемы заряжаются кристаллами:\nПламя — ${FRUIT_NAMES[TOTEMS[0].kind ?? '0']}, Гроза — ${FRUIT_NAMES[TOTEMS[2].kind ?? '3']},\nДар ступеней — любыми матчами`,
+          `Тотемы срабатывают сами при матче:\nПламя — взрыв, Гроза — молния,\nДар ступеней — дополнительные ходы`,
           {
           fontFamily: RUBIK, fontSize: '13px', color: '#8fd8b4', align: 'center',
         }).setOrigin(0.5),

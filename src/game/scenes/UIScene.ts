@@ -20,8 +20,7 @@ import {
 import { getLevel, eraOf, goalText as goalLabel, type ChestDef } from '../data/LevelFactory';
 import {
   TOTEMS,
-  BONUS_UPGRADES,
-  CRIT_TABLE,
+  PROC_TABLE,
   UPGRADE_COST,
   UPGRADE_RATE,
   totemStats,
@@ -89,12 +88,14 @@ export class UIScene extends Phaser.Scene {
     this.events.on('toast', this.toast, this);
     this.events.on('hud', this.setHudVisible, this);
     this.events.on('coinFly', this.flyCoins, this);
+    this.events.on('openTotem', this.openTotemModal, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.events.off('openLevel', this.openLevelModal, this);
       this.events.off('openChest', this.openChestModal, this);
       this.events.off('toast', this.toast, this);
       this.events.off('hud', this.setHudVisible, this);
       this.events.off('coinFly', this.flyCoins, this);
+      this.events.off('openTotem', this.openTotemModal, this);
       this.unsub?.();
     });
 
@@ -318,31 +319,31 @@ export class UIScene extends Phaser.Scene {
       this.add.text(0, -228, def.name, { fontFamily: RUSSO, fontSize: '19px', color: '#f5b52e' }).setOrigin(0.5),
     );
     items.push(
-      this.add.text(0, -204, def.desc, { fontFamily: RUBIK, fontSize: '13px', color: '#b9ad87' }).setOrigin(0.5),
+      this.add.text(0, -206, def.desc, { fontFamily: RUBIK, fontSize: '13px', color: '#b9ad87' }).setOrigin(0.5),
     );
     const statStr =
       sel === 'red'
-        ? `Взрыв ${stats.radius}×${stats.radius} · крит ${stats.crit}% · 2-й снаряд ${stats.extraBall}%`
+        ? `Взрыв ${stats.radius}×${stats.radius} · 2-й снаряд ${stats.extraBall}% · шанс ${stats.proc}%`
         : sel === 'green'
-          ? `+${stats.moves} хода · крит ${stats.crit}% (+2 хода)`
-          : `Цепь ${stats.chain} фишек · крит ${stats.crit}% (×2) · заряд фишек ${stats.chargedChance}%`;
+          ? `+${stats.moves} хода · шанс ${stats.proc}%`
+          : `Цепь ${stats.chain} фишек · шанс ${stats.proc}%`;
     items.push(
-      this.add.text(0, -182, statStr, { fontFamily: RUBIK, fontSize: '12.5px', fontStyle: 'bold', color: '#9dffce' }).setOrigin(0.5),
+      this.add.text(0, -184, statStr, { fontFamily: RUBIK, fontSize: '12.5px', fontStyle: 'bold', color: '#9dffce' }).setOrigin(0.5),
     );
 
     // общий баланс
     items.push(
-      this.add.image(-70, -156, 'gemIcon').setScale(0.5),
-      this.add.text(-52, -155, `${fmtNum(playerState.data.gems)}`, { fontFamily: RUSSO, fontSize: '13px', color: '#f9ecc8' }).setOrigin(0, 0.5),
-      this.add.image(30, -156, 'coin').setScale(0.5),
-      this.add.text(48, -155, `${fmtNum(playerState.data.coins)}`, { fontFamily: RUSSO, fontSize: '13px', color: '#f9ecc8' }).setOrigin(0, 0.5),
+      this.add.image(-70, -160, 'gemIcon').setScale(0.5),
+      this.add.text(-52, -159, `${fmtNum(playerState.data.gems)}`, { fontFamily: RUSSO, fontSize: '13px', color: '#f9ecc8' }).setOrigin(0, 0.5),
+      this.add.image(30, -160, 'coin').setScale(0.5),
+      this.add.text(48, -159, `${fmtNum(playerState.data.coins)}`, { fontFamily: RUSSO, fontSize: '13px', color: '#f9ecc8' }).setOrigin(0, 0.5),
     );
 
     const ratePct = (c: 'gems' | 'coins') => `${Math.round(UPGRADE_RATE[c] * 100)}%`;
 
-    // покупка попытки прокачки (гемы / монеты)
-    const tryBuy = (upgradeId: string, currency: 'gems' | 'coins', rowBg: Phaser.GameObjects.Graphics) => {
-      const res = playerState.tryUpgradeTotem(sel, upgradeId, currency);
+    // покупка ступени (гемы / монеты) — ресурсы горят при неудаче
+    const tryBuy = (track: 'proc' | 'power', currency: 'gems' | 'coins') => {
+      const res = playerState.tryUpgradeTotem(sel, track, currency);
       if (!res.affordable) {
         sfx.play('invalid');
         this.toast(currency === 'gems' ? 'Недостаточно гемов' : 'Недостаточно монет');
@@ -355,99 +356,55 @@ export class UIScene extends Phaser.Scene {
       } else {
         sfx.play('invalid');
         sfx.vibrate('heavy');
-        this.toast('Неудача… ресурсы потрачены');
+        this.toast('Неудача… ресурсы сгорели');
       }
-      // перерисовка модалки (уровни/баланс изменились)
-      this.openTotemModal(sel);
+      this.openTotemModal(sel); // перерисовка
     };
 
-    // ---- Уровни крита (1–10) ----
-    items.push(
-      this.add.text(-228, -130, 'УРОВНИ КРИТА', { fontFamily: RUSSO, fontSize: '13px', color: '#f5b52e' }),
-    );
-    const perRow = 5;
-    for (let lv = 1; lv <= 10; lv++) {
-      const idx = lv - 1;
-      const col = idx % perRow;
-      const rowN = Math.floor(idx / perRow);
-      const x = -184 + col * 92;
-      const y = -100 + rowN * 62;
-      const owned = save.level >= lv;
-      const isNext = save.level === lv - 1;
-      const cell = this.add.graphics();
-      cell.fillStyle(owned ? 0x1d4a2e : 0x0c2417, 1);
-      roundedRectPath(cell, x - 42, y - 26, 84, 52, 8);
-      cell.fillPath();
-      cell.lineStyle(2, owned ? 0x2ee6a8 : isNext ? 0xf5b52e : 0x2c5a40, owned || isNext ? 1 : 0.6);
-      roundedRectPath(cell, x - 42, y - 26, 84, 52, 8);
-      cell.strokePath();
-      items.push(cell);
-      items.push(
-        this.add.text(x, y - 12, owned ? `Ур. ${lv} ✓` : `Ур. ${lv}`, {
-          fontFamily: RUSSO, fontSize: '11px', color: owned ? '#9dffce' : '#f9ecc8',
-        }).setOrigin(0.5),
-      );
-      items.push(
-        this.add.text(x, y + 4, `+${CRIT_TABLE[idx]}% крит`, {
-          fontFamily: RUBIK, fontSize: '9.5px', color: '#8fd8b4',
-        }).setOrigin(0.5),
-      );
-      if (isNext) {
+    // ---- Шкала из 10 ячеек + кнопки покупки ----
+    const drawTrack = (label: string, sub: string, baseY: number, track: 'proc' | 'power', level: number) => {
+      items.push(this.add.text(-228, baseY, label, { fontFamily: RUSSO, fontSize: '13px', color: '#f5b52e' }));
+      items.push(this.add.text(228, baseY, sub, { fontFamily: RUBIK, fontSize: '10.5px', color: '#8fd8b4' }).setOrigin(1, 0));
+      for (let lv = 1; lv <= 10; lv++) {
+        const col = (lv - 1) % 5;
+        const rowN = Math.floor((lv - 1) / 5);
+        const x = -184 + col * 92;
+        const y = baseY + 28 + rowN * 40;
+        const owned = level >= lv;
+        const isNext = level === lv - 1;
+        const cell = this.add.graphics();
+        cell.fillStyle(owned ? 0x1d4a2e : 0x0c2417, 1);
+        roundedRectPath(cell, x - 42, y - 15, 84, 30, 7);
+        cell.fillPath();
+        cell.lineStyle(2, owned ? 0x2ee6a8 : isNext ? 0xf5b52e : 0x2c5a40, owned || isNext ? 1 : 0.6);
+        roundedRectPath(cell, x - 42, y - 15, 84, 30, 7);
+        cell.strokePath();
+        items.push(cell);
+        const val = track === 'proc' ? `${PROC_TABLE[lv - 1]}%` : `${lv}`;
         items.push(
-          this.add.text(x, y + 17, `${UPGRADE_COST.gems}💎${ratePct('gems')} · ${UPGRADE_COST.coins}🪙${ratePct('coins')}`, {
-            fontFamily: RUBIK, fontSize: '8.5px', color: '#ffd76a',
+          this.add.text(x, y + 1, owned ? `${val} ✓` : val, {
+            fontFamily: RUSSO, fontSize: '11px', color: owned ? '#9dffce' : isNext ? '#ffd76a' : '#7d8f7c',
           }).setOrigin(0.5),
         );
-        const hit = this.add.rectangle(x, y, 84, 52, 0x000000, 0).setInteractive({ useHandCursor: true });
-        hit.on('pointerup', () => {
-          // чередуем валюту по балансу: если гемов хватает — гемы, иначе монеты
-          const currency: 'gems' | 'coins' = playerState.data.gems >= UPGRADE_COST.gems ? 'gems' : 'coins';
-          tryBuy('crit', currency, cell);
-        });
-        items.push(hit);
       }
-    }
-
-    // ---- Бонус-улучшения ----
-    items.push(
-      this.add.text(-228, 44, 'ОСОБЫЕ УЛУЧШЕНИЯ', { fontFamily: RUSSO, fontSize: '13px', color: '#f5b52e' }),
-    );
-    BONUS_UPGRADES[sel].forEach((u, i) => {
-      const y = 76 + i * 62;
-      const owned = playerState.hasBonus(sel, u.id);
-      const cell = this.add.graphics();
-      cell.fillStyle(owned ? 0x1d4a2e : 0x0c2417, 1);
-      roundedRectPath(cell, -228, y - 26, 456, 52, 8);
-      cell.fillPath();
-      cell.lineStyle(2, owned ? 0x2ee6a8 : 0x2c5a40, owned ? 1 : 0.6);
-      roundedRectPath(cell, -228, y - 26, 456, 52, 8);
-      cell.strokePath();
-      items.push(cell);
-      items.push(
-        this.add.text(-216, y - 9, u.name, { fontFamily: RUSSO, fontSize: '12px', color: owned ? '#9dffce' : '#f9ecc8' }),
-      );
-      items.push(
-        this.add.text(-216, y + 8, u.desc, { fontFamily: RUBIK, fontSize: '10.5px', color: '#8fd8b4' }),
-      );
-      if (owned) {
-        items.push(this.add.text(214, y, 'КУПЛЕНО', { fontFamily: RUSSO, fontSize: '11px', color: '#2ee6a8' }).setOrigin(1, 0.5));
+      // кнопки покупки следующей ступени
+      const buyY = baseY + 118;
+      const maxed = level >= 10;
+      if (maxed) {
+        items.push(this.add.text(0, buyY, 'МАКСИМУМ', { fontFamily: RUSSO, fontSize: '13px', color: '#2ee6a8' }).setOrigin(0.5));
       } else {
-        items.push(
-          this.add.text(214, y - 8, `${UPGRADE_COST.gems}💎 ${ratePct('gems')}`, { fontFamily: RUBIK, fontSize: '10px', color: '#ffd76a' }).setOrigin(1, 0.5),
-          this.add.text(214, y + 8, `${UPGRADE_COST.coins}🪙 ${ratePct('coins')}`, { fontFamily: RUBIK, fontSize: '10px', color: '#ffd76a' }).setOrigin(1, 0.5),
-        );
-        const hit = this.add.rectangle(0, y, 456, 52, 0x000000, 0).setInteractive({ useHandCursor: true });
-        hit.on('pointerup', () => {
-          const currency: 'gems' | 'coins' = playerState.data.gems >= UPGRADE_COST.gems ? 'gems' : 'coins';
-          tryBuy(u.id, currency, cell);
-        });
-        items.push(hit);
+        const gemBtn = makeButton(this, `💎 ${UPGRADE_COST.gems} · ${ratePct('gems')}`, () => tryBuy(track, 'gems'), { w: 210, h: 44, style: 'gold', font: 13 }).setPosition(-112, buyY);
+        const coinBtn = makeButton(this, `🪙 ${UPGRADE_COST.coins} · ${ratePct('coins')}`, () => tryBuy(track, 'coins'), { w: 210, h: 44, style: 'dark', font: 13 }).setPosition(112, buyY);
+        items.push(gemBtn, coinBtn);
       }
-    });
+    };
+
+    drawTrack('ШАНС СРАБАТЫВАНИЯ', 'за каждый матч', -132, 'proc', save.proc);
+    drawTrack('СИЛА ЭФФЕКТА', 'мощность тотема', 30, 'power', save.power);
 
     items.push(
-      this.add.text(0, 282, 'Тап по улучшению: тратится 10💎 или 1500🪙, шанс 10%/7%.\nПри неудаче ресурсы сгорают.', {
-        fontFamily: RUBIK, fontSize: '11px', color: '#8a8468', align: 'center',
+      this.add.text(0, 300, 'Тотем срабатывает сам при матче. Ступень: 10💎(10%) или 1500🪙(7%).\nПри неудаче ресурсы сгорают, уровень не растёт.', {
+        fontFamily: RUBIK, fontSize: '10.5px', color: '#8a8468', align: 'center',
       }).setOrigin(0.5),
     );
 
