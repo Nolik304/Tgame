@@ -1,9 +1,10 @@
 // ============================================================
-// Состояние игрока: прогресс, валюты, жизни, бусты, настройки.
-// Хранение: localStorage + облачная синхронизация ВК (VKBridge).
+// Состояние игрока: прогресс, валюты, жизни, бусты, настройки,
+// ежедневные награды. Хранение: localStorage + облако ВК.
 // Подписка через onChange() — UI обновляется реактивно.
 // ============================================================
 import { vk, type VKProfile } from './VKBridgeService';
+import { DAILY_REWARDS } from '../data/gameData';
 
 export interface Boosts {
   coins2x?: number; // unix ms, до какого момента активен буст
@@ -27,6 +28,8 @@ export interface SaveData {
   name: string;
   photo: string;
   vkId: number;
+  dailyStreak: number; // 1..7 — текущий день лестницы наград
+  lastDaily: string; // 'YYYY-M-D' последнего сбора
 }
 
 export const MAX_LIVES = 5;
@@ -46,6 +49,8 @@ const DEFAULTS: SaveData = {
   name: '',
   photo: '',
   vkId: 0,
+  dailyStreak: 0,
+  lastDaily: '',
 };
 
 type Listener = () => void;
@@ -194,6 +199,35 @@ class PlayerState {
     this.data.boosts[kind] = Date.now() + minutes * 60_000;
     this.save();
     this.emit();
+  }
+
+  // ---------- Ежедневный «Дар богов» ----------
+  private dayStr(offsetDays = 0): string {
+    const d = new Date(Date.now() - offsetDays * 86_400_000);
+    return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+  }
+
+  canClaimDaily(): boolean {
+    return this.data.lastDaily !== this.dayStr();
+  }
+
+  /** Какой день лестницы будет получен при следующем сборе (1..7). */
+  dailyDayNext(): number {
+    if (!this.canClaimDaily()) return this.data.dailyStreak || 1;
+    return this.data.lastDaily === this.dayStr(1) ? (this.data.dailyStreak % 7) + 1 : 1;
+  }
+
+  claimDaily(): { day: number; coins: number; gems: number } | null {
+    if (!this.canClaimDaily()) return null;
+    const day = this.dailyDayNext();
+    const reward = DAILY_REWARDS[day - 1];
+    this.data.dailyStreak = day;
+    this.data.lastDaily = this.dayStr();
+    this.data.coins = Math.min(999999, this.data.coins + reward.coins);
+    this.data.gems = Math.min(99999, this.data.gems + reward.gems);
+    this.save();
+    this.emit();
+    return { day, ...reward };
   }
 
   // ---------- Профиль / настройки ----------

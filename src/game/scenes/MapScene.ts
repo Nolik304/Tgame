@@ -176,6 +176,27 @@ export class MapScene extends Phaser.Scene {
   }
 
   private buildAmbient(): void {
+    // божественные лучи с небес (экраны слой, медленно покачиваются)
+    const rays = this.add.container(GAME_W / 2, -160).setDepth(-1);
+    for (let i = 0; i < 3; i++) {
+      const rg = this.add.graphics();
+      rg.fillStyle(i % 2 === 0 ? 0xf5b52e : 0x9dffce, 0.05);
+      const w = 150 + i * 70;
+      rg.fillTriangle(-w / 2, 0, w / 2, 0, w * 0.16, 980 + i * 140);
+      rg.setBlendMode(Phaser.BlendModes.ADD);
+      rg.setPosition((i - 1) * 160, 0);
+      rg.setRotation((i - 1) * 0.22);
+      rays.add(rg);
+    }
+    this.tweens.add({
+      targets: rays,
+      angle: { from: -4, to: 4 },
+      duration: 9000,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
     // светлячки (экранный слой, не зависит от скролла)
     this.add
       .particles(0, 0, 'spark', {

@@ -14,6 +14,7 @@ import {
   CHAPTERS,
   PROMOS,
   FRUIT_NAMES,
+  DAILY_REWARDS,
   getLevels,
   type LevelDef,
   type ChestDef,
@@ -58,6 +59,10 @@ export class UIScene extends Phaser.Scene {
   private toasts: Phaser.GameObjects.Container[] = [];
   private unsub?: () => void;
   private resetArmed = false;
+  private hudVisible = true;
+  private pendingCoinFly = 0;
+  private dailyShown = false;
+  private giftDot?: Phaser.GameObjects.Arc;
 
   constructor() {
     super('UIScene');
@@ -75,10 +80,14 @@ export class UIScene extends Phaser.Scene {
     this.events.on('openLevel', this.openLevelModal, this);
     this.events.on('openChest', this.openChestModal, this);
     this.events.on('toast', this.toast, this);
+    this.events.on('hud', this.setHudVisible, this);
+    this.events.on('coinFly', this.flyCoins, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.events.off('openLevel', this.openLevelModal, this);
       this.events.off('openChest', this.openChestModal, this);
       this.events.off('toast', this.toast, this);
+      this.events.off('hud', this.setHudVisible, this);
+      this.events.off('coinFly', this.flyCoins, this);
       this.unsub?.();
     });
 
@@ -90,6 +99,169 @@ export class UIScene extends Phaser.Scene {
     this.refreshHUD();
     this.refreshProfile();
     this.drawPromo(this.promoIdx);
+
+    // помечаем все HUD-объекты, чтобы прятать их на время боя
+    this.children.list.forEach((o) => {
+      (o as { __hud?: boolean }).__hud = true;
+    });
+
+    if (playerState.canClaimDaily() && !this.dailyShown) {
+      this.dailyShown = true;
+      this.time.delayedCall(1200, () => {
+        if (!this.modal && !this.scene.isActive('GameScene')) this.openDailyModal();
+      });
+    }
+  }
+
+  /** Показать/спрятать HUD (на время боя HUD не мешает GameScene). */
+  private setHudVisible(v: boolean): void {
+    this.hudVisible = v;
+    this.children.list.forEach((o) => {
+      if ((o as { __hud?: boolean }).__hud) {
+        (o as Phaser.GameObjects.GameObject & { setVisible: (b: boolean) => void }).setVisible(v);
+      }
+    });
+    if (v && this.pendingCoinFly > 0) {
+      const n = this.pendingCoinFly;
+      this.pendingCoinFly = 0;
+      this.time.delayedCall(350, () => this.flyCoins(n));
+    }
+  }
+
+  /** Монеты летят с поля боя в пилюлю монет. */
+  private flyCoins(count: number): void {
+    if (!this.hudVisible) {
+      this.pendingCoinFly += count;
+      return;
+    }
+    for (let i = 0; i < count; i++) {
+      this.time.delayedCall(i * 80, () => {
+        if (!this.hudVisible || !this.scene.isActive('UIScene')) return;
+        const coin = this.add
+          .image(GAME_W / 2 + Phaser.Math.Between(-170, 170), 470 + Phaser.Math.Between(-40, 120), 'coin')
+          .setScale(0.7)
+          .setDepth(95);
+        this.tweens.add({
+          targets: coin,
+          x: 334,
+          y: 40,
+          scale: 0.35,
+          duration: 640,
+          ease: 'Cubic.easeIn',
+          delay: 140,
+          onComplete: () => {
+            coin.destroy();
+            this.pop(this.coinsText);
+            sfx.play('coin');
+          },
+        });
+      });
+    }
+  }
+
+  /** «Дар богов» — ежедневная лестница наград на 7 дней. */
+  private openDailyModal(): void {
+    const pop = new Popup(this, 470, 480, 'ДАР БОГОВ');
+    const items: Phaser.GameObjects.GameObject[] = [];
+    const claimable = playerState.canClaimDaily();
+    const dayNext = playerState.dailyDayNext();
+    const streak = playerState.data.dailyStreak;
+
+    items.push(
+      this.add.text(0, -174, claimable ? 'Ежедневная лестница наград' : 'Сегодня дар уже получен', {
+        fontFamily: RUBIK,
+        fontSize: '14px',
+        color: '#b9ad87',
+      }).setOrigin(0.5),
+    );
+
+    const tileW = 56;
+    const gap = 5;
+    const totalW = 7 * tileW + 6 * gap;
+    DAILY_REWARDS.forEach((rew, i) => {
+      const day = i + 1;
+      const x = -totalW / 2 + tileW / 2 + i * (tileW + gap);
+      const isNext = claimable && day === dayNext;
+      const isDone = claimable ? day < dayNext : day <= streak;
+      const g = this.add.graphics();
+      g.fillStyle(isNext ? 0x3a2c08 : 0x0c2417, 1);
+      roundedRectPath(g, x - tileW / 2, -148, tileW, 108, 8);
+      g.fillPath();
+      g.lineStyle(2, isNext ? 0xf5b52e : isDone ? 0x2c5a40 : 0x1d4a2e, 1);
+      roundedRectPath(g, x - tileW / 2, -148, tileW, 108, 8);
+      g.strokePath();
+      items.push(g);
+      items.push(
+        this.add.text(x, -134, `День ${day}`, {
+          fontFamily: RUBIK,
+          fontSize: '10px',
+          color: isNext ? '#ffd76a' : '#8fd8b4',
+        }).setOrigin(0.5),
+      );
+      items.push(this.add.image(x, -104, 'coin').setScale(0.55));
+      items.push(
+        this.add.text(x, -76, `${rew.coins}`, { fontFamily: RUSSO, fontSize: '12px', color: '#f9ecc8' }).setOrigin(0.5),
+      );
+      if (rew.gems > 0) {
+        items.push(this.add.image(x - 12, -54, 'gemIcon').setScale(0.42));
+        items.push(
+          this.add.text(x, -53, `+${rew.gems}`, { fontFamily: RUSSO, fontSize: '11px', color: '#9dffce' }).setOrigin(0, 0.5),
+        );
+      }
+      if (isDone) {
+        g.lineStyle(3, 0x2ee6a8, 1);
+        g.lineBetween(x - 8, -98, x - 2, -91);
+        g.lineBetween(x - 2, -91, x + 9, -106);
+      }
+      if (isNext) {
+        const gl = this.add.image(x, -94, 'glow').setTint(0xf5b52e).setScale(0.8).setAlpha(0.5);
+        items.push(gl);
+        this.tweens.add({ targets: gl, alpha: { from: 0.25, to: 0.6 }, duration: 600, yoyo: true, repeat: -1 });
+      }
+    });
+
+    items.push(
+      this.add.text(0, 4, claimable ? `День ${dayNext} из 7 — забери дар!` : 'Возвращайся завтра — лестница продолжится', {
+        fontFamily: RUBIK,
+        fontSize: '14px',
+        fontStyle: 'bold',
+        color: '#f9ecc8',
+      }).setOrigin(0.5),
+    );
+
+    const btn = makeButton(
+      this,
+      claimable ? `ЗАБРАТЬ ДЕНЬ ${dayNext}` : 'ПРИХОДИ ЗАВТРА',
+      () => {
+        const r = playerState.claimDaily();
+        if (r) {
+          sfx.play('chest');
+          sfx.vibrate('medium');
+          this.toast(`Дар богов: +${r.coins} монет${r.gems ? `, +${r.gems} гемов` : ''}`);
+          this.giftDot?.destroy();
+          this.giftDot = undefined;
+          const em = this.add
+            .particles(GAME_W / 2, GAME_H / 2 - 84, 'spark', {
+              speed: { min: 120, max: 420 },
+              scale: { start: 0.8, end: 0 },
+              lifespan: 900,
+              tint: [0xffd76a, 0x9dffce, 0xff97a8],
+              gravityY: 300,
+              emitting: false,
+            })
+            .setDepth(120);
+          em.explode(40);
+          this.time.delayedCall(1000, () => em.destroy());
+          pop.close();
+        } else {
+          this.toast('Боги одарят тебя завтра');
+        }
+      },
+      { w: 340, h: 66, style: claimable ? 'gold' : 'dark', font: 19 },
+    ).setPosition(0, 74);
+    items.push(btn);
+
+    pop.add(items);
   }
 
   // ---------------- Хедер ----------------
@@ -151,6 +323,21 @@ export class UIScene extends Phaser.Scene {
     this.boostChip.on('pointerup', () => this.toast('x2 монеты за уровни активен!'));
 
     // кнопки справа
+    makeIconButton(this, 'gift', () => {
+      sfx.play('click');
+      this.openDailyModal();
+    }).setPosition(396, 92);
+    if (playerState.canClaimDaily()) {
+      this.giftDot = this.add.circle(412, 76, 7, 0xff5a5a).setStrokeStyle(2.5, 0x08190f);
+      this.tweens.add({
+        targets: this.giftDot,
+        scale: { from: 1, to: 1.35 },
+        duration: 480,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+    }
     makeIconButton(this, 'gear', () => this.openSettingsModal()).setPosition(448, 92);
     makeIconButton(this, 'bag', () => this.openShopModal()).setPosition(500, 92);
   }

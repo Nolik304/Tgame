@@ -217,6 +217,18 @@ export const SKILLS: SkillDef[] = [
   },
 ];
 
+// ---------- Ежедневные награды «Дар богов» ----------
+
+export const DAILY_REWARDS: { coins: number; gems: number }[] = [
+  { coins: 60, gems: 0 },
+  { coins: 90, gems: 0 },
+  { coins: 120, gems: 1 },
+  { coins: 160, gems: 1 },
+  { coins: 220, gems: 2 },
+  { coins: 300, gems: 3 },
+  { coins: 500, gems: 5 },
+];
+
 // ---------- Геометрия карты ----------
 
 export const NODE_SPACING = 150;

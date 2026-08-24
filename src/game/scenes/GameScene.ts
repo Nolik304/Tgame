@@ -37,11 +37,28 @@ const BOARD_Y = 268;
 const RUBIK = '"Rubik"';
 const RUSSO = '"Russo One"';
 
+type SpecialType = 'torch' | 'eye';
+
 interface FruitObj {
   kind: FruitKind;
   sprite: Phaser.GameObjects.Image;
+  aura?: Phaser.GameObjects.Image;
+  special?: SpecialType;
   r: number;
   c: number;
+}
+
+interface SpawnDef {
+  r: number;
+  c: number;
+  kind: FruitKind;
+  type: SpecialType;
+}
+
+interface Wave {
+  removed: Set<string>;
+  spawns: SpawnDef[];
+  detonations: number;
 }
 interface CellPos {
   r: number;
@@ -125,8 +142,10 @@ export class GameScene extends Phaser.Scene {
     this.buildInput();
     this.showStartOverlay();
 
+    this.scene.get('UIScene')?.events.emit('hud', false);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.hintTimer?.destroy();
+      this.scene.get('UIScene')?.events.emit('hud', true);
     });
   }
 
@@ -904,10 +923,9 @@ export class GameScene extends Phaser.Scene {
       if (groups.length === 0) break;
       chain++;
       if (chain >= 2) this.showChainText(chain);
-      for (const grp of groups) {
-        await this.popGroup(grp, chain);
-        if (!this.scene.isActive('GameScene')) return;
-      }
+      const wave = this.collectRemovals(groups);
+      await this.popWave(wave, groups, chain);
+      if (!this.scene.isActive('GameScene')) return;
       await this.collapse();
     }
   }
@@ -930,31 +948,96 @@ export class GameScene extends Phaser.Scene {
     this.resetHintTimer();
   }
 
-  private async popGroup(grp: MatchGroup, chain: number): Promise<void> {
-    const n = grp.cells.length;
-    const bonus = n === 4 ? 60 : n >= 5 ? 150 : 0;
-    const gained = (n * 20 + bonus) * chain;
-    this.score += gained;
+  /** Собирает волну очистки: совпадения + цепные детонации реликвий + новые реликвии. */
+  private collectRemovals(groups: MatchGroup[]): Wave {
+    const removed = new Set<string>();
+    for (const g of groups) for (const cell of g.cells) removed.add(`${cell.r},${cell.c}`);
 
-    // заряд боевого навыка
-    this.chargeSkill(grp.kind, n);
-
-    if (this.level.goal.type === 'collect' && this.level.goal.kind === grp.kind) {
-      this.collected += n;
-      this.bumpBoss();
-      if (this.level.type === 'boss') sfx.vibrate('medium');
+    // длинные комбо оставляют после себя реликвию
+    const spawns: SpawnDef[] = [];
+    for (const g of groups) {
+      if (g.cells.length >= 4) {
+        const at = g.cells[Math.floor(g.cells.length / 2)];
+        spawns.push({ r: at.r, c: at.c, kind: g.kind, type: g.cells.length >= 5 ? 'eye' : 'torch' });
+        removed.delete(`${at.r},${at.c}`);
+      }
     }
+
+    // цепные детонации реликвий, задетых волной
+    const processed = new Set<string>();
+    let detonations = 0;
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const key of Array.from(removed)) {
+        if (processed.has(key)) continue;
+        const [r, c] = key.split(',').map(Number);
+        const fruit = this.grid[r][c];
+        if (!fruit || !fruit.special) continue;
+        processed.add(key);
+        changed = true;
+        detonations++;
+        if (fruit.special === 'torch') {
+          for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+              const nr = r + dr;
+              const nc = c + dc;
+              if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS) removed.add(`${nr},${nc}`);
+            }
+          }
+        } else {
+          // Око бога стирает самый частый фрукт на поле
+          const counts = new Map<FruitKind, number>();
+          for (let rr = 0; rr < ROWS; rr++) {
+            for (let cc = 0; cc < COLS; cc++) {
+              const k = this.grid[rr][cc]?.kind;
+              if (k) counts.set(k, (counts.get(k) ?? 0) + 1);
+            }
+          }
+          let best: FruitKind = 'apple';
+          let bestN = -1;
+          counts.forEach((cnt, k) => {
+            if (cnt > bestN) {
+              bestN = cnt;
+              best = k;
+            }
+          });
+          for (let rr = 0; rr < ROWS; rr++) {
+            for (let cc = 0; cc < COLS; cc++) {
+              if (this.grid[rr][cc]?.kind === best) removed.add(`${rr},${cc}`);
+            }
+          }
+        }
+      }
+    }
+    return { removed, spawns, detonations };
+  }
+
+  private async popWave(wave: Wave, groups: MatchGroup[], chain: number): Promise<void> {
+    let bonus = 0;
+    for (const g of groups) bonus += g.cells.length === 4 ? 60 : g.cells.length >= 5 ? 150 : 0;
+    const n = wave.removed.size;
+    const gained = (n * 20 + bonus + wave.detonations * 40) * chain;
+    this.score += gained;
 
     let cx = 0;
     let cy = 0;
-    const color = FRUIT_COLORS[grp.kind];
-    grp.cells.forEach(({ r, c }) => {
+    let counted = 0;
+    const collectKind = this.level.goal.type === 'collect' ? this.level.goal.kind : null;
+    const perCellParticles = n > 36 ? 3 : 7;
+    const kindCounts = new Map<FruitKind, number>();
+
+    wave.removed.forEach((key) => {
+      const [r, c] = key.split(',').map(Number);
       const fruit = this.grid[r][c];
       this.grid[r][c] = null;
       if (!fruit) return;
       const { x, y } = this.gemXY(r, c);
       cx += x;
       cy += y;
+      kindCounts.set(fruit.kind, (kindCounts.get(fruit.kind) ?? 0) + 1);
+      if (collectKind && fruit.kind === collectKind) counted++;
+      const color = FRUIT_COLORS[fruit.kind];
       const em = this.add.particles(x, y, 'spark', {
         speed: { min: 60, max: 260 },
         scale: { start: 0.55, end: 0 },
@@ -963,8 +1046,9 @@ export class GameScene extends Phaser.Scene {
         gravityY: 180,
         emitting: false,
       }).setDepth(20);
-      em.explode(7);
+      em.explode(perCellParticles);
       this.time.delayedCall(700, () => em.destroy());
+      if (fruit.aura) fruit.aura.destroy();
       this.tweens.add({
         targets: fruit.sprite,
         scale: 0.85,
@@ -974,10 +1058,49 @@ export class GameScene extends Phaser.Scene {
         onComplete: () => fruit.sprite.destroy(),
       });
     });
-    cx /= n;
-    cy /= n;
 
-    this.floatText(cx, cy - 10, `+${gained}`, chain >= 2 ? '#9dffce' : '#ffd76a', 17 + Math.min(chain, 4) * 2);
+    kindCounts.forEach((cnt, kind) => this.chargeSkill(kind, cnt));
+    if (counted > 0) {
+      this.collected += counted;
+      this.bumpBoss();
+      if (this.level.type === 'boss') sfx.vibrate('medium');
+    }
+    if (n > 0) {
+      cx /= n;
+      cy /= n;
+    }
+
+    if (wave.detonations > 0) {
+      this.cameras.main.flash(180, 255, 214, 120);
+      this.cameras.main.shake(220, 0.009);
+      sfx.play('boost');
+      sfx.vibrate('heavy');
+    }
+
+    // реликвии вспыхивают на месте длинных комбо
+    for (const sp of wave.spawns) {
+      const fruit = this.grid[sp.r][sp.c];
+      if (!fruit) continue;
+      fruit.special = sp.type;
+      const { x, y } = this.gemXY(sp.r, sp.c);
+      const aura = this.add.image(x, y, sp.type === 'torch' ? 'aura_torch' : 'aura_eye').setScale(0.62);
+      this.board.add(aura);
+      fruit.aura = aura;
+      this.tweens.add({
+        targets: aura,
+        scale: { from: 0.62, to: 0.74 },
+        duration: 520,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+      const fl = this.add.image(x, y, 'glow').setTint(sp.type === 'torch' ? 0xffb020 : 0x9dffce).setScale(0.35).setDepth(22);
+      this.tweens.add({ targets: fl, scale: 1.5, alpha: 0, duration: 420, onComplete: () => fl.destroy() });
+      this.floatText(x, y - 36, sp.type === 'torch' ? 'ОГНЕННЫЙ ЖЕЗЛ!' : 'ОКО БОГА!', sp.type === 'torch' ? '#ffb020' : '#9dffce', 16);
+      sfx.play('boost');
+    }
+
+    this.floatText(cx || GAME_W / 2, (cy || 420) - 10, `+${gained}`, chain >= 2 ? '#9dffce' : '#ffd76a', 17 + Math.min(chain, 4) * 2);
     sfx.play('match', chain);
     this.updateHUD();
 
@@ -989,7 +1112,7 @@ export class GameScene extends Phaser.Scene {
       const flash = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0xffffff, 0.22).setDepth(35);
       this.tweens.add({ targets: flash, alpha: 0, duration: 260, onComplete: () => flash.destroy() });
     }
-    await this.sleep(165);
+    await this.sleep(175);
   }
 
   private moveFruit(fruit: FruitObj): Promise<void> {
@@ -997,7 +1120,7 @@ export class GameScene extends Phaser.Scene {
     const dist = Math.abs(y - fruit.sprite.y) / CELL;
     return new Promise((resolve) => {
       this.tweens.add({
-        targets: fruit.sprite,
+        targets: fruit.aura ? [fruit.sprite, fruit.aura] : fruit.sprite,
         x,
         y,
         duration: 110 + dist * 35,
@@ -1177,6 +1300,7 @@ export class GameScene extends Phaser.Scene {
     const coins = this.level.rewardCoins * (boost ? 2 : 1);
     playerState.completeLevel(this.level.id, stars, coins, this.level.rewardGems);
 
+    this.scene.get('UIScene')?.events.emit('coinFly', 4 + stars * 2);
     await this.sleep(800);
     if (!this.scene.isActive('GameScene')) return;
     this.showWinOverlay(stars, coins, boost);

@@ -33,7 +33,63 @@ export class BootScene extends Phaser.Scene {
 
   create(): void {
     this.buildTextures();
+    this.buildSpecialTextures();
     this.showSplash();
+  }
+
+  // ---------- Спец-фишки, реликвии комбо и подарки ----------
+
+  private buildSpecialTextures(): void {
+    // Аура «Огненного жезла» (матч 4 в ряд)
+    let g = this.g();
+    g.fillStyle(0xff7a1a, 0.32);
+    g.fillCircle(48, 48, 42);
+    g.lineStyle(6, 0xffb020, 0.95);
+    g.strokeCircle(48, 48, 34);
+    g.lineStyle(2.5, 0xffe493, 0.8);
+    g.strokeCircle(48, 48, 41);
+    for (let i = 0; i < 3; i++) {
+      const a = -Math.PI / 2 + (i - 1) * 0.5;
+      const bx = 48 + Math.cos(a) * 34;
+      const by = 48 + Math.sin(a) * 34;
+      g.fillStyle(0xffd76a, 0.95);
+      g.fillTriangle(bx - 5, by + 3, bx + 5, by + 3, bx, by - 9);
+    }
+    g.generateTexture('aura_torch', 96, 96);
+    g.destroy();
+
+    // Аура «Ока бога» (матч 5 в ряд)
+    g = this.g();
+    g.fillStyle(0x9dffce, 0.3);
+    g.fillCircle(48, 48, 42);
+    g.lineStyle(5, 0xf4fff8, 0.95);
+    g.strokeCircle(48, 48, 34);
+    g.fillStyle(0xf4fff8, 1);
+    g.fillEllipse(48, 48, 40, 22);
+    g.fillStyle(0x123b52, 1);
+    g.fillCircle(48, 48, 9);
+    g.fillStyle(0x9dffce, 1);
+    g.fillCircle(48, 48, 4);
+    g.fillStyle(0xffffff, 0.9);
+    g.fillCircle(45, 45, 2.4);
+    g.generateTexture('aura_eye', 96, 96);
+    g.destroy();
+
+    // Подарок «Дар богов»
+    g = this.g();
+    g.fillStyle(0xb8352c, 1);
+    g.fillRoundedRect(8, 22, 32, 22, 4);
+    g.fillStyle(0xd94a3f, 1);
+    g.fillRoundedRect(5, 14, 38, 11, 4);
+    g.fillStyle(0xffd76a, 1);
+    g.fillRect(21, 14, 6, 30);
+    g.lineStyle(3, 0xffd76a, 1);
+    g.strokeCircle(18, 11, 5);
+    g.strokeCircle(30, 11, 5);
+    g.fillStyle(0xffffff, 0.25);
+    g.fillRoundedRect(11, 26, 9, 15, 3);
+    g.generateTexture('gift', 48, 48);
+    g.destroy();
   }
 
   private g(): Phaser.GameObjects.Graphics {
