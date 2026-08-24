@@ -11,15 +11,22 @@ import Phaser from 'phaser';
 import {
   GAME_W,
   GAME_H,
-  CHAPTERS,
   PROMOS,
   FRUIT_NAMES,
   DAILY_REWARDS,
-  getLevels,
   type LevelDef,
-  type ChestDef,
   type PromoDef,
 } from '../data/gameData';
+import { getLevel, eraOf, goalText as goalLabel, type ChestDef } from '../data/LevelFactory';
+import {
+  TOTEMS,
+  BONUS_UPGRADES,
+  CRIT_TABLE,
+  UPGRADE_COST,
+  UPGRADE_RATE,
+  totemStats,
+  type TotemId,
+} from '../data/TotemSystem';
 import { playerState, MAX_LIVES } from '../services/PlayerState';
 import { sfx } from '../services/SoundManager';
 import { vk } from '../services/VKBridgeService';
@@ -264,6 +271,189 @@ export class UIScene extends Phaser.Scene {
     pop.add(items);
   }
 
+  // ---------------- Тотемы (прокачка) ----------------
+
+  private openTotemModal(sel: TotemId): void {
+    this.closeModal();
+    const pop = new Popup(this, 500, 720, 'ТОТЕМЫ БОГОВ');
+    this.modal = pop;
+    const items: Phaser.GameObjects.GameObject[] = [];
+
+    // вкладки тотемов
+    const tabs: Phaser.GameObjects.Container[] = [];
+    TOTEMS.forEach((t, i) => {
+      const x = (i - 1) * 130;
+      const tab = this.add.container(x, -288);
+      const bg = this.add.graphics();
+      const icon = this.add.image(0, 0, t.icon).setScale(0.62);
+      const label = this.add.text(0, 30, t.name.split(' ')[0], {
+        fontFamily: RUSSO, fontSize: '11px', color: '#b9ad87',
+      }).setOrigin(0.5);
+      const hit = this.add.rectangle(0, 8, 118, 78, 0x000000, 0).setInteractive({ useHandCursor: true });
+      tab.add([bg, icon, label, hit]);
+      hit.on('pointerup', () => {
+        sfx.play('click');
+        this.openTotemModal(t.id);
+      });
+      tabs.push(tab);
+      items.push(tab);
+    });
+
+    const def = TOTEMS.find((t) => t.id === sel)!;
+    const save = playerState.data.totems[sel];
+    const stats = totemStats(sel, save);
+
+    // подсветка активной вкладки
+    const active = tabs[TOTEMS.indexOf(def)];
+    const ag = active.getAt(0) as Phaser.GameObjects.Graphics;
+    ag.fillStyle(0x123626, 1);
+    roundedRectPath(ag, -56, -32, 112, 74, 12);
+    ag.fillPath();
+    ag.lineStyle(2.5, def.color, 1);
+    roundedRectPath(ag, -56, -32, 112, 74, 12);
+    ag.strokePath();
+
+    // описание и текущие характеристики
+    items.push(
+      this.add.text(0, -228, def.name, { fontFamily: RUSSO, fontSize: '19px', color: '#f5b52e' }).setOrigin(0.5),
+    );
+    items.push(
+      this.add.text(0, -204, def.desc, { fontFamily: RUBIK, fontSize: '13px', color: '#b9ad87' }).setOrigin(0.5),
+    );
+    const statStr =
+      sel === 'red'
+        ? `Взрыв ${stats.radius}×${stats.radius} · крит ${stats.crit}% · 2-й снаряд ${stats.extraBall}%`
+        : sel === 'green'
+          ? `+${stats.moves} хода · крит ${stats.crit}% (+2 хода)`
+          : `Цепь ${stats.chain} фишек · крит ${stats.crit}% (×2) · заряд фишек ${stats.chargedChance}%`;
+    items.push(
+      this.add.text(0, -182, statStr, { fontFamily: RUBIK, fontSize: '12.5px', fontStyle: 'bold', color: '#9dffce' }).setOrigin(0.5),
+    );
+
+    // общий баланс
+    items.push(
+      this.add.image(-70, -156, 'gemIcon').setScale(0.5),
+      this.add.text(-52, -155, `${fmtNum(playerState.data.gems)}`, { fontFamily: RUSSO, fontSize: '13px', color: '#f9ecc8' }).setOrigin(0, 0.5),
+      this.add.image(30, -156, 'coin').setScale(0.5),
+      this.add.text(48, -155, `${fmtNum(playerState.data.coins)}`, { fontFamily: RUSSO, fontSize: '13px', color: '#f9ecc8' }).setOrigin(0, 0.5),
+    );
+
+    const ratePct = (c: 'gems' | 'coins') => `${Math.round(UPGRADE_RATE[c] * 100)}%`;
+
+    // покупка попытки прокачки (гемы / монеты)
+    const tryBuy = (upgradeId: string, currency: 'gems' | 'coins', rowBg: Phaser.GameObjects.Graphics) => {
+      const res = playerState.tryUpgradeTotem(sel, upgradeId, currency);
+      if (!res.affordable) {
+        sfx.play('invalid');
+        this.toast(currency === 'gems' ? 'Недостаточно гемов' : 'Недостаточно монет');
+        return;
+      }
+      if (res.success) {
+        sfx.play('chest');
+        sfx.vibrate('medium');
+        this.toast('УСПЕХ! Тотем усилен!');
+      } else {
+        sfx.play('invalid');
+        sfx.vibrate('heavy');
+        this.toast('Неудача… ресурсы потрачены');
+      }
+      // перерисовка модалки (уровни/баланс изменились)
+      this.openTotemModal(sel);
+    };
+
+    // ---- Уровни крита (1–10) ----
+    items.push(
+      this.add.text(-228, -130, 'УРОВНИ КРИТА', { fontFamily: RUSSO, fontSize: '13px', color: '#f5b52e' }),
+    );
+    const perRow = 5;
+    for (let lv = 1; lv <= 10; lv++) {
+      const idx = lv - 1;
+      const col = idx % perRow;
+      const rowN = Math.floor(idx / perRow);
+      const x = -184 + col * 92;
+      const y = -100 + rowN * 62;
+      const owned = save.level >= lv;
+      const isNext = save.level === lv - 1;
+      const cell = this.add.graphics();
+      cell.fillStyle(owned ? 0x1d4a2e : 0x0c2417, 1);
+      roundedRectPath(cell, x - 42, y - 26, 84, 52, 8);
+      cell.fillPath();
+      cell.lineStyle(2, owned ? 0x2ee6a8 : isNext ? 0xf5b52e : 0x2c5a40, owned || isNext ? 1 : 0.6);
+      roundedRectPath(cell, x - 42, y - 26, 84, 52, 8);
+      cell.strokePath();
+      items.push(cell);
+      items.push(
+        this.add.text(x, y - 12, owned ? `Ур. ${lv} ✓` : `Ур. ${lv}`, {
+          fontFamily: RUSSO, fontSize: '11px', color: owned ? '#9dffce' : '#f9ecc8',
+        }).setOrigin(0.5),
+      );
+      items.push(
+        this.add.text(x, y + 4, `+${CRIT_TABLE[idx]}% крит`, {
+          fontFamily: RUBIK, fontSize: '9.5px', color: '#8fd8b4',
+        }).setOrigin(0.5),
+      );
+      if (isNext) {
+        items.push(
+          this.add.text(x, y + 17, `${UPGRADE_COST.gems}💎${ratePct('gems')} · ${UPGRADE_COST.coins}🪙${ratePct('coins')}`, {
+            fontFamily: RUBIK, fontSize: '8.5px', color: '#ffd76a',
+          }).setOrigin(0.5),
+        );
+        const hit = this.add.rectangle(x, y, 84, 52, 0x000000, 0).setInteractive({ useHandCursor: true });
+        hit.on('pointerup', () => {
+          // чередуем валюту по балансу: если гемов хватает — гемы, иначе монеты
+          const currency: 'gems' | 'coins' = playerState.data.gems >= UPGRADE_COST.gems ? 'gems' : 'coins';
+          tryBuy('crit', currency, cell);
+        });
+        items.push(hit);
+      }
+    }
+
+    // ---- Бонус-улучшения ----
+    items.push(
+      this.add.text(-228, 44, 'ОСОБЫЕ УЛУЧШЕНИЯ', { fontFamily: RUSSO, fontSize: '13px', color: '#f5b52e' }),
+    );
+    BONUS_UPGRADES[sel].forEach((u, i) => {
+      const y = 76 + i * 62;
+      const owned = playerState.hasBonus(sel, u.id);
+      const cell = this.add.graphics();
+      cell.fillStyle(owned ? 0x1d4a2e : 0x0c2417, 1);
+      roundedRectPath(cell, -228, y - 26, 456, 52, 8);
+      cell.fillPath();
+      cell.lineStyle(2, owned ? 0x2ee6a8 : 0x2c5a40, owned ? 1 : 0.6);
+      roundedRectPath(cell, -228, y - 26, 456, 52, 8);
+      cell.strokePath();
+      items.push(cell);
+      items.push(
+        this.add.text(-216, y - 9, u.name, { fontFamily: RUSSO, fontSize: '12px', color: owned ? '#9dffce' : '#f9ecc8' }),
+      );
+      items.push(
+        this.add.text(-216, y + 8, u.desc, { fontFamily: RUBIK, fontSize: '10.5px', color: '#8fd8b4' }),
+      );
+      if (owned) {
+        items.push(this.add.text(214, y, 'КУПЛЕНО', { fontFamily: RUSSO, fontSize: '11px', color: '#2ee6a8' }).setOrigin(1, 0.5));
+      } else {
+        items.push(
+          this.add.text(214, y - 8, `${UPGRADE_COST.gems}💎 ${ratePct('gems')}`, { fontFamily: RUBIK, fontSize: '10px', color: '#ffd76a' }).setOrigin(1, 0.5),
+          this.add.text(214, y + 8, `${UPGRADE_COST.coins}🪙 ${ratePct('coins')}`, { fontFamily: RUBIK, fontSize: '10px', color: '#ffd76a' }).setOrigin(1, 0.5),
+        );
+        const hit = this.add.rectangle(0, y, 456, 52, 0x000000, 0).setInteractive({ useHandCursor: true });
+        hit.on('pointerup', () => {
+          const currency: 'gems' | 'coins' = playerState.data.gems >= UPGRADE_COST.gems ? 'gems' : 'coins';
+          tryBuy(u.id, currency, cell);
+        });
+        items.push(hit);
+      }
+    });
+
+    items.push(
+      this.add.text(0, 282, 'Тап по улучшению: тратится 10💎 или 1500🪙, шанс 10%/7%.\nПри неудаче ресурсы сгорают.', {
+        fontFamily: RUBIK, fontSize: '11px', color: '#8a8468', align: 'center',
+      }).setOrigin(0.5),
+    );
+
+    pop.add(items);
+  }
+
   // ---------------- Хедер ----------------
 
   private buildHeader(): void {
@@ -305,30 +495,30 @@ export class UIScene extends Phaser.Scene {
     }).setOrigin(0, 0.5);
 
     // буст-чип
-    this.boostChip = this.add.container(300, 92).setAlpha(0);
+    this.boostChip = this.add.container(289, 92).setAlpha(0);
     const chipG = this.add.graphics();
     chipG.fillStyle(0x4c3a10, 0.95);
-    roundedRectPath(chipG, -86, -16, 172, 32, 16);
+    roundedRectPath(chipG, -75, -16, 150, 32, 16);
     chipG.fillPath();
     chipG.lineStyle(2, 0xf5b52e, 1);
-    roundedRectPath(chipG, -86, -16, 172, 32, 16);
+    roundedRectPath(chipG, -75, -16, 150, 32, 16);
     chipG.strokePath();
     this.boostChipText = this.add.text(0, 1, '', {
       fontFamily: RUSSO,
-      fontSize: '13px',
+      fontSize: '12px',
       color: '#ffd76a',
     }).setOrigin(0.5);
     this.boostChip.add([chipG, this.boostChipText]);
-    this.boostChip.setInteractive(new Phaser.Geom.Rectangle(-86, -16, 172, 32), Phaser.Geom.Rectangle.Contains);
+    this.boostChip.setInteractive(new Phaser.Geom.Rectangle(-75, -16, 150, 32), Phaser.Geom.Rectangle.Contains);
     this.boostChip.on('pointerup', () => this.toast('x2 монеты за уровни активен!'));
 
     // кнопки справа
     makeIconButton(this, 'gift', () => {
       sfx.play('click');
       this.openDailyModal();
-    }).setPosition(396, 92);
+    }, 44).setPosition(380, 92);
     if (playerState.canClaimDaily()) {
-      this.giftDot = this.add.circle(412, 76, 7, 0xff5a5a).setStrokeStyle(2.5, 0x08190f);
+      this.giftDot = this.add.circle(394, 76, 7, 0xff5a5a).setStrokeStyle(2.5, 0x08190f);
       this.tweens.add({
         targets: this.giftDot,
         scale: { from: 1, to: 1.35 },
@@ -338,8 +528,18 @@ export class UIScene extends Phaser.Scene {
         ease: 'Sine.easeInOut',
       });
     }
-    makeIconButton(this, 'gear', () => this.openSettingsModal()).setPosition(448, 92);
-    makeIconButton(this, 'bag', () => this.openShopModal()).setPosition(500, 92);
+    makeIconButton(this, 'skill_red', () => this.openTotemModal('red'), 44).setPosition(426, 92);
+    makeIconButton(this, 'gear', () => this.openSettingsModal(), 44).setPosition(472, 92);
+    makeIconButton(this, 'bag', () => this.openShopModal(), 44).setPosition(518, 92);
+  }
+
+  /** Масштаб, приводящий PNG любого размера к нужной высоте (для иконок). */
+  private fitIcon(key: string, targetPx: number): number {
+    const tex = this.textures.get(key);
+    if (!tex || tex.key === '__MISSING') return targetPx / 96;
+    const src = tex.getSourceImage() as HTMLImageElement | HTMLCanvasElement;
+    const w = src?.width || 96;
+    return targetPx / w;
   }
 
   /** Пилюля ресурса: иконка + значение. Возвращает текстовый объект значения. */
@@ -376,19 +576,11 @@ export class UIScene extends Phaser.Scene {
     setIf(this.gemsText, fmtNum(d.gems));
     const lives = playerState.livesNow();
     setIf(this.livesText, `${lives}/${MAX_LIVES}`);
-    const cur = Math.min(d.level, 24);
-    this.levelChipText.setText(`Уровень ${cur} · ${this.chapterOf(cur)}`);
-    this.playSubText?.setText(`Уровень ${cur} — ${this.levelName(cur)}`);
+    const cur = d.level;
+    this.levelChipText.setText(`Ступень ${cur} · ${eraOf(cur).title}`);
+    this.playSubText?.setText(`Ступень ${cur} — ${getLevel(cur).name}`);
     this.refreshProfile();
     this.updateBoostChip();
-  }
-
-  private chapterOf(id: number): string {
-    return CHAPTERS.find((c) => id >= c.from && id <= c.to)?.title ?? '';
-  }
-
-  private levelName(id: number): string {
-    return getLevels().find((l) => l.id === id)?.name ?? '';
   }
 
   private refreshProfile(): void {
@@ -562,7 +754,7 @@ export class UIScene extends Phaser.Scene {
       draw(false);
       sfx.play('click');
       sfx.vibrate('light');
-      this.scene.get('MapScene')?.events.emit('focusLevel', Math.min(playerState.data.level, 24));
+      this.scene.get('MapScene')?.events.emit('focusLevel', playerState.data.level);
     });
     c.add([g, label, this.playSubText, hit]);
     this.tweens.add({
@@ -610,12 +802,17 @@ export class UIScene extends Phaser.Scene {
     const items: Phaser.GameObjects.GameObject[] = [];
 
     const numText = this.add
-      .text(0, headY, `УРОВЕНЬ ${def.id}`, { fontFamily: RUSSO, fontSize: '27px', color: '#f5b52e' })
+      .text(0, headY, `СТУПЕНЬ ${def.id}`, { fontFamily: RUSSO, fontSize: '27px', color: '#f5b52e' })
       .setOrigin(0.5);
     const nameText = this.add
       .text(0, headY + 32, def.name, { fontFamily: RUBIK, fontSize: '15px', color: '#b9ad87' })
       .setOrigin(0.5);
-    items.push(numText, nameText);
+    const eraText = this.add
+      .text(0, headY + 52, `Эпоха ${eraOf(def.id).numeral} · ${eraOf(def.id).title}`, {
+        fontFamily: RUBIK, fontSize: '11px', color: '#8fd8b4',
+      })
+      .setOrigin(0.5);
+    items.push(numText, nameText, eraText);
 
     if (def.type === 'boss' && def.bossName) {
       items.push(this.add.image(-118, headY + 78, 'skull').setScale(0.8));
@@ -639,27 +836,30 @@ export class UIScene extends Phaser.Scene {
     gBox.strokePath();
     items.push(gBox);
     if (def.goal.type === 'collect') {
-      const icon = this.add.image(-156, goalY, `fruit_${def.goal.kind}`).setScale(0.42);
-      items.push(icon);
       items.push(
-        this.add.text(10, goalY + 1, `Собери ${def.goal.amount} × ${FRUIT_NAMES[def.goal.kind]}`, {
-          fontFamily: RUBIK,
-          fontSize: '16px',
-          fontStyle: 'bold',
-          color: '#f9ecc8',
-        }).setOrigin(0.5),
+        this.add
+          .image(-156, goalY, `fruit_${def.goal.kind}`)
+          .setScale(this.fitIcon(`fruit_${def.goal.kind}`, 40)),
+      );
+    } else if (def.goal.type === 'relic') {
+      items.push(this.add.image(-156, goalY, 'idol').setScale(0.42));
+    } else if (def.goal.type === 'duo') {
+      const [a, b] = def.goal.parts;
+      items.push(
+        this.add.image(-172, goalY, `fruit_${a.kind}`).setScale(this.fitIcon(`fruit_${a.kind}`, 34)),
+        this.add.image(-140, goalY, `fruit_${b.kind}`).setScale(this.fitIcon(`fruit_${b.kind}`, 34)),
       );
     } else {
-      items.push(this.add.image(-156, goalY, 'trophy').setScale(0.85));
-      items.push(
-        this.add.text(10, goalY + 1, `Набери ${fmtNum(def.goal.amount)} очков`, {
-          fontFamily: RUBIK,
-          fontSize: '16px',
-          fontStyle: 'bold',
-          color: '#f9ecc8',
-        }).setOrigin(0.5),
-      );
+      items.push(this.add.image(-156, goalY, 'star').setScale(0.6).setTint(0xf5b52e));
     }
+    items.push(
+      this.add.text(12, goalY + 1, goalLabel(def.goal), {
+        fontFamily: RUBIK,
+        fontSize: '16px',
+        fontStyle: 'bold',
+        color: '#f9ecc8',
+      }).setOrigin(0.5),
+    );
 
     items.push(
       this.add.text(-92, goalY + 62, `Ходы: ${def.moves}`, {

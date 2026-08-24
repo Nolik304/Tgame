@@ -12,6 +12,14 @@ import {
   CARD_DROP_CHANCE,
   getEventStage,
 } from '../data/gameData';
+import {
+  BONUS_UPGRADES,
+  TOTEM_SAVE_DEFAULT,
+  UPGRADE_COST,
+  UPGRADE_RATE,
+  type TotemId,
+  type TotemSave,
+} from '../data/TotemSystem';
 
 export interface Boosts {
   coins2x?: number; // unix ms, до какого момента активен буст
@@ -40,6 +48,7 @@ export interface SaveData {
   cards: Record<string, number>; // коллекция: cardId -> количество
   setsCompleted: number; // сколько полных сетов собрано
   event: { day: string; stage: number }; // ивент: день и пройденная ступень
+  totems: Record<TotemId, TotemSave>; // прокачка тотемов
 }
 
 export const MAX_LIVES = 5;
@@ -64,6 +73,7 @@ const DEFAULTS: SaveData = {
   cards: {},
   setsCompleted: 0,
   event: { day: '', stage: 0 },
+  totems: TOTEM_SAVE_DEFAULT(),
 };
 
 type Listener = () => void;
@@ -90,6 +100,7 @@ class PlayerState {
           chests: [...(parsed.chests ?? [])],
           cards: { ...(parsed.cards ?? {}) },
           event: { ...DEFAULTS.event, ...(parsed.event ?? {}) },
+          totems: { ...TOTEM_SAVE_DEFAULT(), ...(parsed.totems ?? {}) },
         };
         return this.refill(d);
       }
@@ -300,6 +311,47 @@ class PlayerState {
     this.save();
     this.emit();
     return { day, ...reward };
+  }
+
+  // ---------- Прокачка тотемов ----------
+  /**
+   * Попытка прокачать тотем. Стоимость и шанс зависят от валюты
+   * (гемы — дороже шанс, монеты — дешевле шанс). При неудаче
+   * ресурсы сгорают, уровень не растёт (по спеке).
+   */
+  tryUpgradeTotem(
+    id: TotemId,
+    upgradeId: string, // 'crit' (уровень крита) или id бонус-улучшения
+    currency: 'gems' | 'coins',
+  ): { success: boolean; affordable: boolean } {
+    const totem = this.data.totems[id];
+    const cost = UPGRADE_COST[currency];
+    const rate = UPGRADE_RATE[currency];
+
+    // проверка и списание ресурсов
+    if (currency === 'gems') {
+      if (this.data.gems < cost) return { success: false, affordable: false };
+      this.data.gems -= cost;
+    } else {
+      if (this.data.coins < cost) return { success: false, affordable: false };
+      this.data.coins -= cost;
+    }
+
+    const roll = Math.random() < rate;
+    if (roll) {
+      if (upgradeId === 'crit') {
+        totem.level = Math.min(10, totem.level + 1);
+      } else if (BONUS_UPGRADES[id].some((u) => u.id === upgradeId) && !totem.unlocked.includes(upgradeId)) {
+        totem.unlocked.push(upgradeId);
+      }
+    }
+    this.save();
+    this.emit();
+    return { success: roll, affordable: true };
+  }
+
+  hasBonus(id: TotemId, upgradeId: string): boolean {
+    return this.data.totems[id].unlocked.includes(upgradeId);
   }
 
   // ---------- Профиль / настройки ----------
