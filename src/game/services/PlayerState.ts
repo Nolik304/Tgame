@@ -4,7 +4,14 @@
 // Подписка через onChange() — UI обновляется реактивно.
 // ============================================================
 import { vk, type VKProfile } from './VKBridgeService';
-import { DAILY_REWARDS } from '../data/gameData';
+import {
+  DAILY_REWARDS,
+  CARDS,
+  SET_REWARD,
+  DUP_CARD_COINS,
+  CARD_DROP_CHANCE,
+  getEventStage,
+} from '../data/gameData';
 
 export interface Boosts {
   coins2x?: number; // unix ms, до какого момента активен буст
@@ -30,6 +37,9 @@ export interface SaveData {
   vkId: number;
   dailyStreak: number; // 1..7 — текущий день лестницы наград
   lastDaily: string; // 'YYYY-M-D' последнего сбора
+  cards: Record<string, number>; // коллекция: cardId -> количество
+  setsCompleted: number; // сколько полных сетов собрано
+  event: { day: string; stage: number }; // ивент: день и пройденная ступень
 }
 
 export const MAX_LIVES = 5;
@@ -51,6 +61,9 @@ const DEFAULTS: SaveData = {
   vkId: 0,
   dailyStreak: 0,
   lastDaily: '',
+  cards: {},
+  setsCompleted: 0,
+  event: { day: '', stage: 0 },
 };
 
 type Listener = () => void;
@@ -75,6 +88,8 @@ class PlayerState {
           boosts: { ...(parsed.boosts ?? {}) },
           stars: { ...(parsed.stars ?? {}) },
           chests: [...(parsed.chests ?? [])],
+          cards: { ...(parsed.cards ?? {}) },
+          event: { ...DEFAULTS.event, ...(parsed.event ?? {}) },
         };
         return this.refill(d);
       }
@@ -215,6 +230,63 @@ class PlayerState {
   dailyDayNext(): number {
     if (!this.canClaimDaily()) return this.data.dailyStreak || 1;
     return this.data.lastDaily === this.dayStr(1) ? (this.data.dailyStreak % 7) + 1 : 1;
+  }
+
+  // ---------- Коллекция ----------
+  cardsOf(id: string): number {
+    return this.data.cards[id] ?? 0;
+  }
+
+  setProgress(): number {
+    return CARDS.filter((c) => this.cardsOf(c.id) > 0).length;
+  }
+
+  /** Награда за победу: случайная карточка (или дубликат→монеты). */
+  awardRandomCard(): { cardId: string; name: string; isNew: boolean; dupCoins: number } | null {
+    const missing = CARDS.filter((c) => this.cardsOf(c.id) === 0);
+    let card;
+    let isNew = false;
+    if (missing.length > 0) {
+      card = missing[Math.floor(Math.random() * missing.length)];
+      isNew = true;
+    } else {
+      if (Math.random() > CARD_DROP_CHANCE) return null;
+      card = CARDS[Math.floor(Math.random() * CARDS.length)];
+    }
+    this.data.cards[card.id] = this.cardsOf(card.id) + 1;
+    const dupCoins = isNew ? 0 : DUP_CARD_COINS;
+    if (dupCoins) this.data.coins = Math.min(999999, this.data.coins + dupCoins);
+    this.save();
+    this.emit();
+    return { cardId: card.id, name: card.name, isNew, dupCoins };
+  }
+
+  /** Если сет собран — списывает по 1 карте, выдаёт награду. */
+  tryCompleteSet(): boolean {
+    if (CARDS.some((c) => this.cardsOf(c.id) === 0)) return false;
+    for (const c of CARDS) this.data.cards[c.id] -= 1;
+    this.data.setsCompleted += 1;
+    this.data.coins = Math.min(999999, this.data.coins + SET_REWARD.coins);
+    this.data.gems = Math.min(99999, this.data.gems + SET_REWARD.gems);
+    this.save();
+    this.emit();
+    return true;
+  }
+
+  // ---------- Мини-ивент (сбрасывается ежедневно) ----------
+  eventStageNow(): number {
+    if (this.data.event.day !== this.dayStr()) return 0;
+    return this.data.event.stage;
+  }
+
+  completeEventStage(stage: number): { coins: number; gems: number } {
+    const def = getEventStage(stage);
+    this.data.event = { day: this.dayStr(), stage };
+    this.data.coins = Math.min(999999, this.data.coins + def.rewardCoins);
+    this.data.gems = Math.min(99999, this.data.gems + def.rewardGems);
+    this.save();
+    this.emit();
+    return { coins: def.rewardCoins, gems: def.rewardGems };
   }
 
   claimDaily(): { day: number; coins: number; gems: number } | null {

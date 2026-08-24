@@ -41,7 +41,13 @@ export const THEME = {
 
 export type GoalDef =
   | { type: 'score'; amount: number }
-  | { type: 'collect'; kind: FruitKind; amount: number };
+  | { type: 'collect'; kind: FruitKind; amount: number }
+  | { type: 'relic'; amount: number }; // опусти идолов вниз
+
+export interface ObstacleLayout {
+  vines?: [number, number][]; // лианы: блокируют клетку, рвутся от матча рядом
+  slabs?: [number, number][]; // плиты: 2 удара
+}
 
 export interface LevelDef {
   id: number;
@@ -53,6 +59,7 @@ export interface LevelDef {
   rewardCoins: number;
   rewardGems: number;
   bossName?: string;
+  obstacles?: ObstacleLayout;
 }
 
 export interface ChapterDef {
@@ -83,6 +90,29 @@ const BOSS_NAMES: Record<number, string> = {
   24: 'Истукан Солнца',
 };
 
+// Препятствия и реликвии по уровням (чередование механик)
+const VINES: Record<number, [number, number][]> = {
+  3: [[3, 1], [3, 5]],
+  4: [[2, 3], [4, 3]],
+  6: [[2, 1], [2, 5], [4, 1], [4, 5]],
+  9: [[3, 0], [3, 6], [5, 3]],
+  13: [[2, 2], [2, 4], [5, 2], [5, 4]],
+  17: [[1, 3], [3, 1], [3, 5], [5, 3]],
+  19: [[2, 1], [2, 5], [4, 1], [4, 5]],
+  21: [[2, 3], [4, 2], [4, 4]],
+};
+const SLABS: Record<number, [number, number][]> = {
+  7: [[3, 2], [3, 4]],
+  11: [[2, 2], [2, 4], [5, 3]],
+  12: [[4, 1], [4, 5], [2, 3]],
+  15: [[3, 3], [2, 1], [2, 5]],
+  18: [[3, 0], [3, 6], [3, 3]],
+  20: [[2, 2], [2, 4]],
+  23: [[2, 1], [2, 5], [5, 1], [5, 5]],
+};
+// Уровни с целью «опусти идолов вниз»
+const RELIC_LEVELS: Record<number, number> = { 5: 2, 10: 2, 14: 2, 20: 3, 22: 2 };
+
 export function getLevels(): LevelDef[] {
   const levels: LevelDef[] = [];
   for (let id = 1; id <= 24; id++) {
@@ -91,25 +121,78 @@ export function getLevels(): LevelDef[] {
     if (boss) {
       const kind = FRUIT_KINDS[id === 8 ? 0 : id === 16 ? 2 : 5];
       goal = { type: 'collect', kind, amount: 18 + (id / 8) * 5 };
+    } else if (RELIC_LEVELS[id]) {
+      goal = { type: 'relic', amount: RELIC_LEVELS[id] };
     } else if (id % 2 === 0) {
       const kind = FRUIT_KINDS[(id * 3 + 1) % 6];
       goal = { type: 'collect', kind, amount: 12 + Math.floor(id * 0.7) };
     } else {
       goal = { type: 'score', amount: 1100 + id * 140 };
     }
+    const obstacles: ObstacleLayout = {};
+    if (VINES[id]) obstacles.vines = VINES[id];
+    if (SLABS[id]) obstacles.slabs = SLABS[id];
     levels.push({
       id,
       type: boss ? 'boss' : 'normal',
       name: LEVEL_NAMES[id - 1],
-      moves: boss ? 26 : 18 + (id % 4) + (id > 16 ? 2 : 0),
+      moves: boss ? 26 : 18 + (id % 4) + (id > 16 ? 2 : 0) + (RELIC_LEVELS[id] ? 4 : 0),
       goal,
       parScore: 1500 + id * 120,
       rewardCoins: 45 + id * 5,
       rewardGems: id % 6 === 0 ? 2 : id % 3 === 0 ? 1 : 0,
       bossName: boss ? BOSS_NAMES[id] : undefined,
+      obstacles: obstacles.vines || obstacles.slabs ? obstacles : undefined,
     });
   }
   return levels;
+}
+
+// ---------- Коллекция «Солнечная» ----------
+
+export interface CardDef {
+  id: string;
+  name: string;
+}
+
+export const CARDS: CardDef[] = [
+  { id: 'feather', name: 'Перо Кетцаля' },
+  { id: 'mask', name: 'Золотая маска' },
+  { id: 'sun', name: 'Солнечный диск' },
+  { id: 'moon', name: 'Лунный камень' },
+  { id: 'idolcard', name: 'Нефритовый идол' },
+  { id: 'blade', name: 'Обсидиан. клинок' },
+  { id: 'snake', name: 'Амулет змеи' },
+  { id: 'eyecard', name: 'Око бога' },
+];
+
+export const SET_REWARD = { coins: 500, gems: 10 };
+export const DUP_CARD_COINS = 30;
+export const CARD_DROP_CHANCE = 0.45; // шанс дубликата, когда сет уже собран
+
+// ---------- Мини-ивент «Восхождение Жар-птицы» ----------
+
+export const EVENT_NAME = 'ВОСХОЖДЕНИЕ ЖАР-ПТИЦЫ';
+export const EVENT_STAGES = 10;
+
+export interface EventStageDef {
+  moves: number;
+  goal: GoalDef;
+  rewardCoins: number;
+  rewardGems: number; // подарок на рубежах 3 / 6 / 10
+}
+
+export function getEventStage(stage: number): EventStageDef {
+  const goal: GoalDef =
+    stage % 2 === 1
+      ? { type: 'score', amount: 1000 + stage * 180 }
+      : { type: 'collect', kind: FRUIT_KINDS[stage % 6], amount: 9 + stage };
+  return {
+    moves: 14 + Math.ceil(stage / 2),
+    goal,
+    rewardCoins: 40 + stage * 30,
+    rewardGems: stage === 3 ? 2 : stage === 6 ? 4 : stage === 10 ? 8 : 0,
+  };
 }
 
 export interface ChestDef {

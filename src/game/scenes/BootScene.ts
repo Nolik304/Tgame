@@ -34,7 +34,236 @@ export class BootScene extends Phaser.Scene {
   create(): void {
     this.buildTextures();
     this.buildSpecialTextures();
+    this.buildObstacleTextures();
+    this.buildCardTextures();
     this.showSplash();
+  }
+
+  // ---------- Препятствия, идолы, Жар-птица ----------
+
+  private buildObstacleTextures(): void {
+    // Лиана: переплетение стеблей
+    let g = this.g();
+    g.fillStyle(0x0e3a1e, 0.9);
+    g.fillCircle(48, 48, 30);
+    g.lineStyle(7, 0x2e7d32, 1);
+    g.strokeCircle(48, 48, 22);
+    g.lineStyle(5, 0x4caf50, 1);
+    g.beginPath();
+    g.moveTo(20, 70);
+    g.lineTo(76, 26);
+    g.strokePath();
+    g.beginPath();
+    g.moveTo(76, 70);
+    g.lineTo(20, 26);
+    g.strokePath();
+    g.fillStyle(0x7ed321, 1);
+    g.fillEllipse(30, 30, 16, 9);
+    g.fillEllipse(66, 66, 16, 9);
+    g.fillEllipse(66, 30, 16, 9);
+    g.generateTexture('vine', 96, 96);
+    g.destroy();
+
+    // Каменная плита (2 удара)
+    const slab = (key: string, cracked: boolean) => {
+      const s = this.g();
+      s.fillStyle(0x6d6f76, 1);
+      s.fillRoundedRect(10, 14, 76, 68, 10);
+      s.fillStyle(0x8b8e96, 1);
+      s.fillRoundedRect(16, 20, 64, 26, 8);
+      s.fillStyle(0x52545c, 1);
+      s.fillRoundedRect(16, 52, 64, 24, 8);
+      s.lineStyle(4, 0x3c3e45, 1);
+      s.strokeRoundedRect(10, 14, 76, 68, 10);
+      // руны
+      s.lineStyle(3, 0xb8b39f, 0.8);
+      s.strokeCircle(48, 48, 12);
+      s.lineBetween(48, 30, 48, 66);
+      if (cracked) {
+        s.lineStyle(3.5, 0x23242a, 1);
+        s.beginPath();
+        s.moveTo(30, 14);
+        s.lineTo(44, 38);
+        s.lineTo(34, 56);
+        s.lineTo(52, 82);
+        s.strokePath();
+        s.beginPath();
+        s.moveTo(70, 18);
+        s.lineTo(60, 44);
+        s.lineTo(72, 62);
+        s.strokePath();
+      }
+      s.generateTexture(key, 96, 96);
+      s.destroy();
+    };
+    slab('slab', false);
+    slab('slab_crack', true);
+
+    // Лёд (заморозка клетки боссом)
+    g = this.g();
+    g.fillStyle(0x9adcf5, 0.42);
+    g.fillRoundedRect(8, 8, 80, 80, 12);
+    g.lineStyle(4, 0xcdf0ff, 0.9);
+    g.strokeRoundedRect(8, 8, 80, 80, 12);
+    g.lineStyle(2.5, 0xe8f9ff, 0.85);
+    g.lineBetween(20, 76, 46, 20);
+    g.lineBetween(46, 20, 60, 40);
+    g.lineBetween(60, 40, 78, 18);
+    g.fillStyle(0xffffff, 0.5);
+    g.fillTriangle(18, 18, 34, 14, 22, 32);
+    g.generateTexture('ice', 96, 96);
+    g.destroy();
+
+    // Идол (цель «опусти вниз»)
+    g = this.g();
+    g.fillStyle(0x8a6a20, 1);
+    g.fillRoundedRect(20, 12, 56, 72, 12);
+    g.fillStyle(0xf5b52e, 1);
+    g.fillRoundedRect(24, 16, 48, 64, 10);
+    g.fillStyle(0x5c4409, 1);
+    g.fillRoundedRect(32, 30, 12, 10, 3);
+    g.fillRoundedRect(52, 30, 12, 10, 3);
+    g.fillRoundedRect(36, 56, 24, 9, 4);
+    g.lineStyle(3, 0x8a6a20, 1);
+    g.lineBetween(32, 48, 64, 48);
+    g.fillStyle(0xfff2c9, 0.85);
+    g.fillRoundedRect(28, 19, 16, 7, 3);
+    g.generateTexture('idol', 96, 96);
+    g.destroy();
+
+    // Жар-птица (кнопка ивента)
+    g = this.g();
+    // хвост-пламя
+    g.fillStyle(0xff5a2a, 1);
+    g.fillTriangle(20, 84, 40, 48, 44, 86);
+    g.fillStyle(0xffb020, 1);
+    g.fillTriangle(34, 88, 46, 56, 56, 88);
+    // тело
+    g.fillStyle(0xff7a1a, 1);
+    g.fillCircle(50, 42, 20);
+    // крыло
+    g.fillStyle(0xffd76a, 1);
+    g.fillTriangle(36, 40, 62, 24, 66, 52);
+    // голова + клюв
+    g.fillStyle(0xffb020, 1);
+    g.fillCircle(64, 26, 10);
+    g.fillStyle(0xfff2c9, 1);
+    g.fillTriangle(72, 22, 84, 26, 72, 30);
+    g.fillStyle(0x3c1a05, 1);
+    g.fillCircle(66, 24, 2.4);
+    // хохолок
+    g.fillStyle(0xff5a2a, 1);
+    g.fillTriangle(58, 14, 64, 4, 68, 16);
+    g.generateTexture('bird', 96, 96);
+    g.destroy();
+  }
+
+  // ---------- Коллекционные карты ----------
+
+  private buildCardTextures(): void {
+    // Рубашка карты
+    const bg = this.g();
+    bg.fillStyle(0x123024, 1);
+    bg.fillRoundedRect(4, 2, 56, 76, 8);
+    bg.lineStyle(3, 0xf5b52e, 1);
+    bg.strokeRoundedRect(4, 2, 56, 76, 8);
+    bg.fillStyle(0x1d4a35, 1);
+    bg.fillRoundedRect(9, 7, 46, 66, 5);
+    bg.generateTexture('card', 64, 80);
+    bg.destroy();
+
+    const icon = (key: string, draw: (g: Phaser.GameObjects.Graphics) => void) => {
+      const g = this.g();
+      draw(g);
+      g.generateTexture(key, 48, 48);
+      g.destroy();
+    };
+
+    icon('card_feather', (g) => {
+      g.fillStyle(0x2ecc71, 1);
+      g.fillEllipse(24, 22, 16, 34);
+      g.fillStyle(0x9dffce, 1);
+      g.fillEllipse(21, 20, 7, 26);
+      g.lineStyle(3, 0x0c6b38, 1);
+      g.lineBetween(24, 6, 24, 44);
+    });
+    icon('card_mask', (g) => {
+      g.fillStyle(0xf5b52e, 1);
+      g.fillRoundedRect(10, 8, 28, 34, 8);
+      g.fillStyle(0x3c2a05, 1);
+      g.fillEllipse(18, 20, 8, 5);
+      g.fillEllipse(30, 20, 8, 5);
+      g.fillRoundedRect(18, 30, 12, 5, 2);
+      g.fillStyle(0xe8384f, 1);
+      g.fillTriangle(14, 8, 24, 0, 24, 8);
+      g.fillTriangle(24, 8, 34, 0, 34, 8);
+    });
+    icon('card_sun', (g) => {
+      g.fillStyle(0xffb020, 1);
+      for (let i = 0; i < 8; i++) {
+        const a = (i * Math.PI) / 4;
+        g.fillTriangle(
+          24 + Math.cos(a - 0.22) * 13, 24 + Math.sin(a - 0.22) * 13,
+          24 + Math.cos(a + 0.22) * 13, 24 + Math.sin(a + 0.22) * 13,
+          24 + Math.cos(a) * 23, 24 + Math.sin(a) * 23,
+        );
+      }
+      g.fillCircle(24, 24, 12);
+      g.fillStyle(0xfff2c9, 1);
+      g.fillCircle(21, 21, 4);
+    });
+    icon('card_moon', (g) => {
+      g.fillStyle(0xcfe3ff, 1);
+      g.fillCircle(22, 24, 15);
+      g.fillStyle(0x1d4a35, 1);
+      g.fillCircle(30, 19, 13);
+      g.fillStyle(0xffffff, 0.8);
+      g.fillCircle(14, 14, 1.6);
+      g.fillCircle(18, 34, 1.3);
+    });
+    icon('card_idolcard', (g) => {
+      g.fillStyle(0x2ecc71, 1);
+      g.fillRoundedRect(12, 6, 24, 36, 7);
+      g.fillStyle(0x0c6b38, 1);
+      g.fillRoundedRect(17, 14, 6, 5, 2);
+      g.fillRoundedRect(25, 14, 6, 5, 2);
+      g.fillRoundedRect(19, 28, 10, 4, 2);
+    });
+    icon('card_blade', (g) => {
+      g.fillStyle(0x3c3e45, 1);
+      g.fillTriangle(24, 2, 32, 32, 16, 32);
+      g.fillStyle(0x6d6f76, 1);
+      g.fillTriangle(24, 2, 28, 32, 24, 32);
+      g.fillStyle(0x8a6a20, 1);
+      g.fillRect(14, 32, 20, 5);
+      g.fillStyle(0x5c4409, 1);
+      g.fillRect(21, 37, 6, 9);
+    });
+    icon('card_snake', (g) => {
+      g.lineStyle(6, 0x2ecc71, 1);
+      g.beginPath();
+      g.moveTo(10, 38);
+      g.lineTo(20, 20);
+      g.lineTo(30, 34);
+      g.lineTo(38, 12);
+      g.strokePath();
+      g.fillStyle(0x9dffce, 1);
+      g.fillCircle(38, 11, 5);
+      g.fillStyle(0xe8384f, 1);
+      g.fillTriangle(40, 7, 46, 4, 42, 12);
+    });
+    icon('card_eyecard', (g) => {
+      g.fillStyle(0xf4fff8, 1);
+      g.fillEllipse(24, 24, 36, 18);
+      g.fillStyle(0x35d0c0, 1);
+      g.fillCircle(24, 24, 8);
+      g.fillStyle(0x052018, 1);
+      g.fillCircle(24, 24, 4);
+      g.fillStyle(0xffffff, 0.9);
+      g.fillCircle(22, 22, 1.8);
+      g.lineStyle(2.5, 0x0f6e63, 1);
+      g.strokeEllipse(24, 24, 36, 18);
+    });
   }
 
   // ---------- Спец-фишки, реликвии комбо и подарки ----------

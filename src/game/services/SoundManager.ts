@@ -18,7 +18,9 @@ export type SfxName =
   | 'chest'
   | 'coin'
   | 'heart'
-  | 'boost';
+  | 'boost'
+  | 'freeze'
+  | 'stone';
 
 interface ToneOpts {
   type?: OscillatorType;
@@ -119,6 +121,14 @@ class SoundManager {
         break;
       case 'boost':
         this.tone(400, 0.35, { slide: 1400, type: 'triangle', vol: 0.16 });
+        break;
+      case 'freeze':
+        this.tone(1500, 0.3, { slide: 380, type: 'triangle', vol: 0.14 });
+        this.tone(2100, 0.22, { slide: 700, vol: 0.08, delay: 0.06 });
+        break;
+      case 'stone':
+        this.tone(120, 0.16, { type: 'sawtooth', vol: 0.14, slide: 70 });
+        this.tone(90, 0.2, { type: 'square', vol: 0.08, delay: 0.02 });
         break;
     }
   }
