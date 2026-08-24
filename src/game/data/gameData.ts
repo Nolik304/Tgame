@@ -177,51 +177,8 @@ export const PROMOS: PromoDef[] = [
   },
 ];
 
-// ---------- Боевые навыки (аналог тотемов) ----------
-
-export type SkillEffect = 'blast' | 'cross' | 'storm';
-
-export interface SkillDef {
-  id: string;
-  name: string;
-  /** каким фруктом заряжается */
-  kind: FruitKind;
-  /** сколько фруктов нужно собрать для заряда */
-  charge: number;
-  effect: SkillEffect;
-  desc: string;
-  icon: string;
-}
-
-export const SKILLS: SkillDef[] = [
-  {
-    id: 'fire',
-    name: 'ОГОНЬ БОГОВ',
-    kind: '0',
-    charge: 12,
-    effect: 'blast',
-    desc: 'Взрыв 3×3 в выбранной клетке',
-    icon: 'skill_fire',
-  },
-  {
-    id: 'bolt',
-    name: 'НЕБЕСНАЯ МОЛНИЯ',
-    kind: '3',
-    charge: 12,
-    effect: 'cross',
-    desc: 'Молния бьёт крестом: весь ряд и колонка',
-    icon: 'skill_bolt',
-  },
-  {
-    id: 'wind',
-    name: 'ДУХ ВЕТРА',
-    kind: '4',
-    charge: 14,
-    effect: 'storm',
-    desc: 'Ветер уносит все фишки самого частого вида',
-    icon: 'skill_wind',
-  },
-];
+// ---------- Тотемы и их прокачка ----------
+// Определения, дерево улучшений и расчёт характеристик — в TotemSystem.ts
 
 // ---------- Ежедневные награды «Дар богов» ----------
 

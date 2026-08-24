@@ -27,6 +27,28 @@ export class BootScene extends Phaser.Scene {
     this.load.on('loaderror', (file: Phaser.Loader.File) => this.failed.add(file.key));
     for (const k of FRUIT_KINDS) this.load.image(`fruit_${k}`, `fruits/${k}.png`);
     this.load.image('fruitIcon', 'fruits/icon.png');
+    // Иконки тотемов: положи свои PNG в public/skills/ (red.png, green.png, blue.png).
+    this.load.image('skill_red', 'skills/red.png');
+    this.load.image('skill_green', 'skills/green.png');
+    this.load.image('skill_blue', 'skills/blue.png');
+    // Игровые объекты: положи свои PNG в public/sprites/ (необязательно — есть фолбэк).
+    const sprites: [string, string][] = [
+      ['vine', 'sprites/vine.png'],
+      ['slab', 'sprites/slab.png'],
+      ['slab_crack', 'sprites/slab_crack.png'],
+      ['ice', 'sprites/ice.png'],
+      ['idol', 'sprites/idol.png'],
+      ['bird', 'sprites/bird.png'],
+      ['megabomb', 'sprites/bomb.png'],
+      ['chest', 'sprites/chest.png'],
+      ['skull', 'sprites/skull.png'],
+    ];
+    for (const [key, path] of sprites) this.load.image(key, path);
+  }
+
+  /** true, если свой PNG игрока загрузился (процедурный фолбэк не нужен). */
+  private has(key: string): boolean {
+    return this.textures.exists(key) && !this.failed.has(key);
   }
 
   create(): void {
@@ -41,29 +63,32 @@ export class BootScene extends Phaser.Scene {
 
   private buildObstacleTextures(): void {
     // Лиана: переплетение стеблей
-    let g = this.g();
-    g.fillStyle(0x0e3a1e, 0.9);
-    g.fillCircle(48, 48, 30);
-    g.lineStyle(7, 0x2e7d32, 1);
-    g.strokeCircle(48, 48, 22);
-    g.lineStyle(5, 0x4caf50, 1);
-    g.beginPath();
-    g.moveTo(20, 70);
-    g.lineTo(76, 26);
-    g.strokePath();
-    g.beginPath();
-    g.moveTo(76, 70);
-    g.lineTo(20, 26);
-    g.strokePath();
-    g.fillStyle(0x7ed321, 1);
-    g.fillEllipse(30, 30, 16, 9);
-    g.fillEllipse(66, 66, 16, 9);
-    g.fillEllipse(66, 30, 16, 9);
-    g.generateTexture('vine', 96, 96);
-    g.destroy();
+    if (!this.has('vine')) {
+      const g = this.g();
+      g.fillStyle(0x0e3a1e, 0.9);
+      g.fillCircle(48, 48, 30);
+      g.lineStyle(7, 0x2e7d32, 1);
+      g.strokeCircle(48, 48, 22);
+      g.lineStyle(5, 0x4caf50, 1);
+      g.beginPath();
+      g.moveTo(20, 70);
+      g.lineTo(76, 26);
+      g.strokePath();
+      g.beginPath();
+      g.moveTo(76, 70);
+      g.lineTo(20, 26);
+      g.strokePath();
+      g.fillStyle(0x7ed321, 1);
+      g.fillEllipse(30, 30, 16, 9);
+      g.fillEllipse(66, 66, 16, 9);
+      g.fillEllipse(66, 30, 16, 9);
+      g.generateTexture('vine', 96, 96);
+      g.destroy();
+    }
 
     // Каменная плита (2 удара)
     const slab = (key: string, cracked: boolean) => {
+      if (this.has(key)) return;
       const s = this.g();
       s.fillStyle(0x6d6f76, 1);
       s.fillRoundedRect(10, 14, 76, 68, 10);
@@ -98,62 +123,63 @@ export class BootScene extends Phaser.Scene {
     slab('slab_crack', true);
 
     // Лёд (заморозка клетки боссом)
-    g = this.g();
-    g.fillStyle(0x9adcf5, 0.42);
-    g.fillRoundedRect(8, 8, 80, 80, 12);
-    g.lineStyle(4, 0xcdf0ff, 0.9);
-    g.strokeRoundedRect(8, 8, 80, 80, 12);
-    g.lineStyle(2.5, 0xe8f9ff, 0.85);
-    g.lineBetween(20, 76, 46, 20);
-    g.lineBetween(46, 20, 60, 40);
-    g.lineBetween(60, 40, 78, 18);
-    g.fillStyle(0xffffff, 0.5);
-    g.fillTriangle(18, 18, 34, 14, 22, 32);
-    g.generateTexture('ice', 96, 96);
-    g.destroy();
+    if (!this.has('ice')) {
+      const g = this.g();
+      g.fillStyle(0x9adcf5, 0.42);
+      g.fillRoundedRect(8, 8, 80, 80, 12);
+      g.lineStyle(4, 0xcdf0ff, 0.9);
+      g.strokeRoundedRect(8, 8, 80, 80, 12);
+      g.lineStyle(2.5, 0xe8f9ff, 0.85);
+      g.lineBetween(20, 76, 46, 20);
+      g.lineBetween(46, 20, 60, 40);
+      g.lineBetween(60, 40, 78, 18);
+      g.fillStyle(0xffffff, 0.5);
+      g.fillTriangle(18, 18, 34, 14, 22, 32);
+      g.generateTexture('ice', 96, 96);
+      g.destroy();
+    }
 
     // Идол (цель «опусти вниз»)
-    g = this.g();
-    g.fillStyle(0x8a6a20, 1);
-    g.fillRoundedRect(20, 12, 56, 72, 12);
-    g.fillStyle(0xf5b52e, 1);
-    g.fillRoundedRect(24, 16, 48, 64, 10);
-    g.fillStyle(0x5c4409, 1);
-    g.fillRoundedRect(32, 30, 12, 10, 3);
-    g.fillRoundedRect(52, 30, 12, 10, 3);
-    g.fillRoundedRect(36, 56, 24, 9, 4);
-    g.lineStyle(3, 0x8a6a20, 1);
-    g.lineBetween(32, 48, 64, 48);
-    g.fillStyle(0xfff2c9, 0.85);
-    g.fillRoundedRect(28, 19, 16, 7, 3);
-    g.generateTexture('idol', 96, 96);
-    g.destroy();
+    if (!this.has('idol')) {
+      const g = this.g();
+      g.fillStyle(0x8a6a20, 1);
+      g.fillRoundedRect(20, 12, 56, 72, 12);
+      g.fillStyle(0xf5b52e, 1);
+      g.fillRoundedRect(24, 16, 48, 64, 10);
+      g.fillStyle(0x5c4409, 1);
+      g.fillRoundedRect(32, 30, 12, 10, 3);
+      g.fillRoundedRect(52, 30, 12, 10, 3);
+      g.fillRoundedRect(36, 56, 24, 9, 4);
+      g.lineStyle(3, 0x8a6a20, 1);
+      g.lineBetween(32, 48, 64, 48);
+      g.fillStyle(0xfff2c9, 0.85);
+      g.fillRoundedRect(28, 19, 16, 7, 3);
+      g.generateTexture('idol', 96, 96);
+      g.destroy();
+    }
 
     // Жар-птица (кнопка ивента)
-    g = this.g();
-    // хвост-пламя
-    g.fillStyle(0xff5a2a, 1);
-    g.fillTriangle(20, 84, 40, 48, 44, 86);
-    g.fillStyle(0xffb020, 1);
-    g.fillTriangle(34, 88, 46, 56, 56, 88);
-    // тело
-    g.fillStyle(0xff7a1a, 1);
-    g.fillCircle(50, 42, 20);
-    // крыло
-    g.fillStyle(0xffd76a, 1);
-    g.fillTriangle(36, 40, 62, 24, 66, 52);
-    // голова + клюв
-    g.fillStyle(0xffb020, 1);
-    g.fillCircle(64, 26, 10);
-    g.fillStyle(0xfff2c9, 1);
-    g.fillTriangle(72, 22, 84, 26, 72, 30);
-    g.fillStyle(0x3c1a05, 1);
-    g.fillCircle(66, 24, 2.4);
-    // хохолок
-    g.fillStyle(0xff5a2a, 1);
-    g.fillTriangle(58, 14, 64, 4, 68, 16);
-    g.generateTexture('bird', 96, 96);
-    g.destroy();
+    if (!this.has('bird')) {
+      const g = this.g();
+      g.fillStyle(0xff5a2a, 1);
+      g.fillTriangle(20, 84, 40, 48, 44, 86);
+      g.fillStyle(0xffb020, 1);
+      g.fillTriangle(34, 88, 46, 56, 56, 88);
+      g.fillStyle(0xff7a1a, 1);
+      g.fillCircle(50, 42, 20);
+      g.fillStyle(0xffd76a, 1);
+      g.fillTriangle(36, 40, 62, 24, 66, 52);
+      g.fillStyle(0xffb020, 1);
+      g.fillCircle(64, 26, 10);
+      g.fillStyle(0xfff2c9, 1);
+      g.fillTriangle(72, 22, 84, 26, 72, 30);
+      g.fillStyle(0x3c1a05, 1);
+      g.fillCircle(66, 24, 2.4);
+      g.fillStyle(0xff5a2a, 1);
+      g.fillTriangle(58, 14, 64, 4, 68, 16);
+      g.generateTexture('bird', 96, 96);
+      g.destroy();
+    }
   }
 
   // ---------- Коллекционные карты ----------
@@ -377,10 +403,8 @@ export class BootScene extends Phaser.Scene {
       b.destroy();
     }
 
-    // ---------- Иконки боевых навыков ----------
-    this.genSkillFire();
-    this.genSkillBolt();
-    this.genSkillWind();
+    // ---------- Иконки тотемов ----------
+    this.genSkillIcons();
 
     // ---------- Сердце ----------
     const h = this.g();
@@ -585,13 +609,21 @@ export class BootScene extends Phaser.Scene {
     g.strokePath();
   }
 
-  // ---------------- Иконки навыков ----------------
+  // ---------------- Иконки тотемов ----------------
+  // Если игрок положил свои PNG в public/skills/ — они уже загружены,
+  // процедурные иконки не создаются.
 
-  private genSkillFire(): void {
+  private genSkillIcons(): void {
+    if (!this.textures.exists('skill_red')) this.genSkillRed();
+    if (!this.textures.exists('skill_green')) this.genSkillGreen();
+    if (!this.textures.exists('skill_blue')) this.genSkillBlue();
+  }
+
+  private genSkillRed(): void {
     const g = this.g();
     g.fillStyle(0xff7a2a, 0.22);
     g.fillCircle(32, 34, 29);
-    g.fillStyle(0xff7a2a, 1);
+    g.fillStyle(0xff5a4a, 1);
     g.fillTriangle(32, 4, 52, 40, 12, 40);
     g.fillCircle(32, 44, 15);
     g.fillStyle(0xffd23e, 1);
@@ -599,44 +631,41 @@ export class BootScene extends Phaser.Scene {
     g.fillCircle(32, 46, 9);
     g.fillStyle(0xfff0a8, 1);
     g.fillCircle(32, 48, 4);
-    g.generateTexture('skill_fire', 64, 64);
+    g.generateTexture('skill_red', 64, 64);
     g.destroy();
   }
 
-  private genSkillBolt(): void {
+  private genSkillBlue(): void {
     const g = this.g();
     const V = (x: number, y: number) => new Phaser.Math.Vector2(x, y);
     const bolt: Phaser.Math.Vector2[] = [
       V(38, 2), V(13, 35), V(27, 35), V(23, 62), V(51, 25), V(35, 25),
     ];
-    g.fillStyle(0xffe24a, 0.22);
+    g.fillStyle(0x4aa8ff, 0.22);
     g.fillCircle(32, 32, 29);
-    g.fillStyle(0xffe24a, 1);
+    g.fillStyle(0x7ec8ff, 1);
     g.fillPoints(bolt, true);
-    g.lineStyle(3, 0xb08a00, 1);
+    g.lineStyle(3, 0x1c5aa8, 1);
     g.strokePoints(bolt, true);
-    g.generateTexture('skill_bolt', 64, 64);
+    g.generateTexture('skill_blue', 64, 64);
     g.destroy();
   }
 
-  private genSkillWind(): void {
+  private genSkillGreen(): void {
     const g = this.g();
-    g.fillStyle(0x9dffce, 0.16);
+    g.fillStyle(0x4ae07a, 0.18);
     g.fillCircle(32, 32, 29);
-    g.lineStyle(6, 0x9dffce, 1);
-    g.beginPath();
-    g.arc(30, 32, 9, -100, 130);
-    g.strokePath();
-    g.beginPath();
-    g.arc(32, 32, 17, -70, 160);
-    g.strokePath();
-    g.lineStyle(5, 0x4ddba0, 1);
-    g.beginPath();
-    g.arc(34, 32, 25, -40, 190);
-    g.strokePath();
-    g.fillStyle(0xeafff5, 1);
-    g.fillCircle(30, 32, 3.4);
-    g.generateTexture('skill_wind', 64, 64);
+    // «+N ходов»: часы-ступени
+    g.lineStyle(5, 0x4ae07a, 1);
+    g.strokeCircle(30, 32, 18);
+    g.lineStyle(4, 0xa8ffc4, 1);
+    g.lineBetween(30, 32, 30, 20);
+    g.lineBetween(30, 32, 40, 36);
+    // плюс
+    g.fillStyle(0x4ae07a, 1);
+    g.fillRoundedRect(46, 26, 14, 5, 2);
+    g.fillRoundedRect(50.5, 21.5, 5, 14, 2);
+    g.generateTexture('skill_green', 64, 64);
     g.destroy();
   }
 
