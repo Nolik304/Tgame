@@ -8,26 +8,26 @@
 export const GAME_W = 540;
 export const GAME_H = 960;
 
-export type FruitKind = 'apple' | 'orange' | 'grape' | 'banana' | 'lime' | 'berry';
+// 5 фишек. Ключи совпадают с именами файлов: fruits/0.png … fruits/4.png
+export type FruitKind = '0' | '1' | '2' | '3' | '4';
 
-export const FRUIT_KINDS: FruitKind[] = ['apple', 'orange', 'grape', 'banana', 'lime', 'berry'];
+export const FRUIT_KINDS: FruitKind[] = ['0', '1', '2', '3', '4'];
 
 export const FRUIT_NAMES: Record<FruitKind, string> = {
-  apple: 'Яблоко',
-  orange: 'Апельсин',
-  grape: 'Виноград',
-  banana: 'Банан',
-  lime: 'Лайм',
-  berry: 'Ягода',
+  '0': 'Рубин',
+  '1': 'Сапфир',
+  '2': 'Изумруд',
+  '3': 'Топаз',
+  '4': 'Аметист',
 };
 
+// Цвета используются только для частиц, свечения и аур (сами фишки — твои PNG)
 export const FRUIT_COLORS: Record<FruitKind, { main: number; light: number; dark: number }> = {
-  apple: { main: 0xe8384f, light: 0xff97a8, dark: 0x8f0f26 },
-  orange: { main: 0xff9020, light: 0xffcf8a, dark: 0xa34e00 },
-  grape: { main: 0xb06bff, light: 0xe0bdff, dark: 0x5b21a8 },
-  banana: { main: 0xffd23e, light: 0xfff0a8, dark: 0xb08a00 },
-  lime: { main: 0x7ed321, light: 0xc8f58a, dark: 0x3a7a00 },
-  berry: { main: 0x5a8bff, light: 0xa3c6ff, dark: 0x1c3a9e },
+  '0': { main: 0xe8384f, light: 0xff97a8, dark: 0x8f0f26 },
+  '1': { main: 0x5a8bff, light: 0xa3c6ff, dark: 0x1c3a9e },
+  '2': { main: 0x7ed321, light: 0xc8f58a, dark: 0x3a7a00 },
+  '3': { main: 0xffd23e, light: 0xfff0a8, dark: 0xb08a00 },
+  '4': { main: 0xb06bff, light: 0xe0bdff, dark: 0x5b21a8 },
 };
 
 export const THEME = {
@@ -119,12 +119,12 @@ export function getLevels(): LevelDef[] {
     const boss = id % 8 === 0;
     let goal: GoalDef;
     if (boss) {
-      const kind = FRUIT_KINDS[id === 8 ? 0 : id === 16 ? 2 : 5];
+      const kind = FRUIT_KINDS[id === 8 ? 0 : id === 16 ? 2 : 4];
       goal = { type: 'collect', kind, amount: 18 + (id / 8) * 5 };
     } else if (RELIC_LEVELS[id]) {
       goal = { type: 'relic', amount: RELIC_LEVELS[id] };
     } else if (id % 2 === 0) {
-      const kind = FRUIT_KINDS[(id * 3 + 1) % 6];
+      const kind = FRUIT_KINDS[(id * 3 + 1) % 5];
       goal = { type: 'collect', kind, amount: 12 + Math.floor(id * 0.7) };
     } else {
       goal = { type: 'score', amount: 1100 + id * 140 };
@@ -186,7 +186,7 @@ export function getEventStage(stage: number): EventStageDef {
   const goal: GoalDef =
     stage % 2 === 1
       ? { type: 'score', amount: 1000 + stage * 180 }
-      : { type: 'collect', kind: FRUIT_KINDS[stage % 6], amount: 9 + stage };
+      : { type: 'collect', kind: FRUIT_KINDS[stage % 5], amount: 9 + stage };
   return {
     moves: 14 + Math.ceil(stage / 2),
     goal,
@@ -246,7 +246,7 @@ export const PROMOS: PromoDef[] = [
     id: 'promo_collection',
     tag: 'КОЛЛЕКЦИЯ',
     title: 'Перья Солнечной птицы',
-    desc: 'Новая коллекция фруктов уже ждёт в магазине',
+    desc: 'Новая коллекция самоцветов уже ждёт в магазине',
     kind: 'collection',
     durationMin: 1440,
     accent: 0xb06bff,
@@ -274,7 +274,7 @@ export const SKILLS: SkillDef[] = [
   {
     id: 'fire',
     name: 'ОГОНЬ БОГОВ',
-    kind: 'apple',
+    kind: '0',
     charge: 12,
     effect: 'blast',
     desc: 'Взрыв 3×3 в выбранной клетке',
@@ -283,7 +283,7 @@ export const SKILLS: SkillDef[] = [
   {
     id: 'bolt',
     name: 'НЕБЕСНАЯ МОЛНИЯ',
-    kind: 'banana',
+    kind: '3',
     charge: 12,
     effect: 'cross',
     desc: 'Молния бьёт крестом: весь ряд и колонка',
@@ -292,10 +292,10 @@ export const SKILLS: SkillDef[] = [
   {
     id: 'wind',
     name: 'ДУХ ВЕТРА',
-    kind: 'lime',
+    kind: '4',
     charge: 14,
     effect: 'storm',
-    desc: 'Ветер уносит все фрукты самого частого вида',
+    desc: 'Ветер уносит все фишки самого частого вида',
     icon: 'skill_wind',
   },
 ];

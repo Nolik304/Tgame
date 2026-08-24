@@ -524,7 +524,7 @@ export class GameScene extends Phaser.Scene {
       this.grid.flat().forEach((f) => {
         if (f) counts.set(f.kind, (counts.get(f.kind) ?? 0) + 1);
       });
-      let best: FruitKind = 'apple';
+      let best: FruitKind = FRUIT_KINDS[0];
       let bn = -1;
       counts.forEach((n, k) => {
         if (n > bn) {
@@ -1219,7 +1219,7 @@ export class GameScene extends Phaser.Scene {
               if (k) counts.set(k, (counts.get(k) ?? 0) + 1);
             }
           }
-          let best: FruitKind = 'apple';
+          let best: FruitKind = FRUIT_KINDS[0];
           let bestN = -1;
           counts.forEach((cnt, k) => {
             if (cnt > bestN) {

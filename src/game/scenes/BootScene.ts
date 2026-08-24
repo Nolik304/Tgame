@@ -14,8 +14,6 @@ import { sfx } from '../services/SoundManager';
 import { vk } from '../services/VKBridgeService';
 import { playerState } from '../services/PlayerState';
 
-type Pt = { x: number; y: number };
-
 export class BootScene extends Phaser.Scene {
   private failed = new Set<string>();
 
@@ -502,119 +500,35 @@ export class BootScene extends Phaser.Scene {
 
   // ---------------- Процедурные фрукты ----------------
 
+  /** Универсальный самоцвет-фолбэк (если твой PNG не загрузился). Цвет берётся из FRUIT_COLORS. */
   private drawFruit(
     g: Phaser.GameObjects.Graphics,
-    kind: FruitKind,
+    _kind: FruitKind,
     c: { main: number; light: number; dark: number },
   ): void {
-    switch (kind) {
-      case 'apple': {
-        g.fillStyle(c.dark, 1);
-        g.fillCircle(48, 56, 34);
-        g.fillGradientStyle(c.light, c.light, c.main, c.main, 1);
-        g.fillCircle(46, 54, 31);
-        g.fillStyle(0x8a5a2a, 1);
-        g.fillRoundedRect(45, 12, 6, 16, 3);
-        g.fillStyle(0x4caf50, 1);
-        g.fillTriangle(52, 16, 78, 10, 62, 30);
-        g.lineStyle(6, 0xffffff, 0.5);
-        g.beginPath();
-        g.arc(40, 48, 20, 190, 250);
-        g.strokePath();
-        break;
-      }
-      case 'orange': {
-        g.fillStyle(c.dark, 1);
-        g.fillCircle(48, 54, 34);
-        g.fillGradientStyle(c.light, c.light, c.main, c.main, 1);
-        g.fillCircle(46, 52, 31);
-        g.fillStyle(c.dark, 0.5);
-        for (let i = 0; i < 9; i++) {
-          const a = i * 0.7;
-          g.fillCircle(46 + Math.cos(a * 2.4) * 18, 52 + Math.sin(a * 3.1) * 18, 1.8);
-        }
-        g.fillStyle(0x4caf50, 1);
-        g.fillTriangle(44, 16, 66, 8, 56, 26);
-        g.lineStyle(6, 0xffffff, 0.5);
-        g.beginPath();
-        g.arc(40, 46, 20, 190, 250);
-        g.strokePath();
-        break;
-      }
-      case 'grape': {
-        const berries: Pt[] = [
-          { x: 36, y: 36 }, { x: 60, y: 36 }, { x: 24, y: 52 }, { x: 48, y: 50 },
-          { x: 72, y: 52 }, { x: 36, y: 66 }, { x: 60, y: 66 }, { x: 48, y: 80 },
-        ];
-        g.fillStyle(0x4caf50, 1);
-        g.fillTriangle(40, 14, 66, 8, 54, 26);
-        g.fillStyle(0x8a5a2a, 1);
-        g.fillRoundedRect(45, 14, 5, 12, 2);
-        for (const p of berries) {
-          g.fillStyle(c.dark, 1);
-          g.fillCircle(p.x, p.y, 13.5);
-          g.fillStyle(c.main, 1);
-          g.fillCircle(p.x - 1.5, p.y - 1.5, 11.5);
-          g.fillStyle(c.light, 0.7);
-          g.fillCircle(p.x - 4, p.y - 4, 3);
-        }
-        break;
-      }
-      case 'banana': {
-        g.lineStyle(22, c.dark, 1);
-        g.beginPath();
-        g.arc(48, 28, 30, 40, 140);
-        g.strokePath();
-        g.lineStyle(17, c.main, 1);
-        g.beginPath();
-        g.arc(48, 27, 30, 42, 138);
-        g.strokePath();
-        g.lineStyle(6, c.light, 0.8);
-        g.beginPath();
-        g.arc(48, 26, 30, 65, 115);
-        g.strokePath();
-        g.fillStyle(0x8a5a2a, 1);
-        g.fillCircle(71, 47, 5);
-        g.fillCircle(25, 47, 5);
-        break;
-      }
-      case 'lime': {
-        g.fillStyle(0x3f8f14, 1);
-        g.fillCircle(48, 50, 35);
-        g.fillStyle(0xd9f5a3, 1);
-        g.fillCircle(48, 50, 29);
-        g.lineStyle(4, 0xf7ffe0, 1);
-        for (let i = 0; i < 6; i++) {
-          const a = (i * Math.PI) / 3;
-          g.lineBetween(48, 50, 48 + Math.cos(a) * 26, 50 + Math.sin(a) * 26);
-        }
-        g.fillStyle(0xf7ffe0, 1);
-        g.fillCircle(48, 50, 5);
-        g.lineStyle(5, 0xffffff, 0.45);
-        g.beginPath();
-        g.arc(44, 44, 26, 195, 245);
-        g.strokePath();
-        break;
-      }
-      case 'berry': {
-        g.fillStyle(c.dark, 1);
-        g.fillCircle(48, 56, 32);
-        g.fillGradientStyle(c.light, c.light, c.main, c.main, 1);
-        g.fillCircle(46, 54, 29);
-        g.fillStyle(0x2c3a6e, 1);
-        const crown: Phaser.Math.Vector2[] = [];
-        for (let i = 0; i < 5; i++) {
-          const a = -Math.PI / 2 + (i * Math.PI * 2) / 5;
-          crown.push(new Phaser.Math.Vector2(48 + Math.cos(a) * 7, 26 + Math.sin(a) * 7));
-        }
-        g.fillPoints(crown, true);
-        g.lineStyle(6, 0xffffff, 0.5);
-        g.beginPath();
-        g.arc(40, 48, 19, 190, 250);
-        g.strokePath();
-        break;
-      }
+    // огранённый камень: тёмная подложка + градиентное тело + блики
+    g.fillStyle(c.dark, 1);
+    g.fillCircle(48, 50, 35);
+    g.fillGradientStyle(c.light, c.light, c.main, c.main, 1);
+    g.fillCircle(46, 48, 32);
+    // грани
+    g.lineStyle(3, c.light, 0.5);
+    g.strokeCircle(46, 48, 22);
+    g.lineStyle(2.5, c.light, 0.4);
+    for (let i = 0; i < 6; i++) {
+      const a = (i * Math.PI) / 3;
+      g.lineBetween(46 + Math.cos(a) * 10, 48 + Math.sin(a) * 10, 46 + Math.cos(a) * 30, 48 + Math.sin(a) * 30);
     }
+    // центральный блик
+    g.fillStyle(0xffffff, 0.55);
+    g.fillCircle(38, 40, 6);
+    g.fillStyle(0xffffff, 0.3);
+    g.fillCircle(52, 34, 3);
+    // контур-обводка
+    g.lineStyle(5, 0xffffff, 0.35);
+    g.beginPath();
+    g.arc(42, 42, 26, 195, 250);
+    g.strokePath();
   }
 
   // ---------------- Иконки навыков ----------------
