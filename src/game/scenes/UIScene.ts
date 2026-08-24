@@ -342,6 +342,15 @@ export class UIScene extends Phaser.Scene {
     makeIconButton(this, 'bag', () => this.openShopModal()).setPosition(500, 92);
   }
 
+  /** Масштаб, приводящий PNG любого размера к нужной высоте (для иконок). */
+  private fitIcon(key: string, targetPx: number): number {
+    const tex = this.textures.get(key);
+    if (!tex || tex.key === '__MISSING') return targetPx / 96;
+    const src = tex.getSourceImage() as HTMLImageElement | HTMLCanvasElement;
+    const w = src?.width || 96;
+    return targetPx / w;
+  }
+
   /** Пилюля ресурса: иконка + значение. Возвращает текстовый объект значения. */
   private makePill(x: number, y: number, w: number, icon: string): Phaser.GameObjects.Text {
     const g = this.add.graphics();
@@ -639,7 +648,9 @@ export class UIScene extends Phaser.Scene {
     gBox.strokePath();
     items.push(gBox);
     if (def.goal.type === 'collect') {
-      const icon = this.add.image(-156, goalY, `fruit_${def.goal.kind}`).setScale(0.42);
+      const icon = this.add
+        .image(-156, goalY, `fruit_${def.goal.kind}`)
+        .setScale(this.fitIcon(`fruit_${def.goal.kind}`, 40));
       items.push(icon);
       items.push(
         this.add.text(10, goalY + 1, `Собери ${def.goal.amount} × ${FRUIT_NAMES[def.goal.kind]}`, {

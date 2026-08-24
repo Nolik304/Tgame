@@ -45,6 +45,7 @@ type SpecialType = 'torch' | 'eye';
 interface FruitObj {
   kind: FruitKind;
   sprite: Phaser.GameObjects.Image;
+  baseScale: number; // нормализованный масштаб под реальный размер PNG
   aura?: Phaser.GameObjects.Image;
   special?: SpecialType;
   frozen?: Phaser.GameObjects.Image; // лёд босса
@@ -294,7 +295,11 @@ export class GameScene extends Phaser.Scene {
     goalBox.strokePath();
     hud.add(goalBox);
     if (this.level.goal.type === 'collect') {
-      hud.add(this.add.image(296, 106, `fruit_${this.level.goal.kind}`).setScale(0.34));
+      hud.add(
+        this.add
+          .image(296, 106, `fruit_${this.level.goal.kind}`)
+          .setScale(this.fitScale(`fruit_${this.level.goal.kind}`, 30)),
+      );
     } else if (this.level.goal.type === 'relic') {
       hud.add(this.add.image(296, 106, 'idol').setScale(0.34));
     } else {
@@ -338,7 +343,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     hud.add(
-      this.add.text(GAME_W / 2, 806, 'Меняй фрукты местами — собирай 3 в ряд', {
+      this.add.text(GAME_W / 2, 806, 'Меняй кристаллы местами — собирай 3 в ряд', {
         fontFamily: RUBIK, fontSize: '13px', color: '#71806f',
       }).setOrigin(0.5),
     );
@@ -377,7 +382,7 @@ export class GameScene extends Phaser.Scene {
       this.skillButtons.push({ def, x, y, icon, ring, glow, count });
     });
     hud.add(
-      this.add.text(GAME_W / 2, 944, 'Боевые навыки заряжаются фруктами своего вида', {
+      this.add.text(GAME_W / 2, 944, 'Боевые навыки заряжаются кристаллами своего вида', {
         fontFamily: RUBIK, fontSize: '11px', color: '#5f7a66',
       }).setOrigin(0.5),
     );
@@ -633,6 +638,19 @@ export class GameScene extends Phaser.Scene {
     return { x: BOARD_X + c * CELL + CELL / 2, y: BOARD_Y + r * CELL + CELL / 2 };
   }
 
+  /**
+   * Масштаб, приводящий спрайт любого исходного размера к нужной высоте.
+   * Твои PNG могут быть 64, 256 или 512 px — на поле они всегда будут
+   * одинакового «игрового» размера, а не огромными квадратами.
+   */
+  private fitScale(key: string, targetPx: number): number {
+    const tex = this.textures.get(key);
+    if (!tex || tex.key === '__MISSING') return targetPx / 96;
+    const src = tex.getSourceImage() as HTMLImageElement | HTMLCanvasElement;
+    const w = src?.width || 96;
+    return targetPx / w;
+  }
+
   private randomKind(): FruitKind {
     return FRUIT_KINDS[Math.floor(Math.random() * FRUIT_KINDS.length)];
   }
@@ -667,9 +685,12 @@ export class GameScene extends Phaser.Scene {
       for (let c = 0; c < COLS; c++) {
         const kind = kinds[r][c];
         const { x, y } = this.gemXY(r, c);
-        const sprite = this.add.image(x, y - 600 - Math.random() * 240, `fruit_${kind}`).setScale(0.6);
+        const baseScale = this.fitScale(`fruit_${kind}`, 56);
+        const sprite = this.add
+          .image(x, y - 600 - Math.random() * 240, `fruit_${kind}`)
+          .setScale(baseScale);
         this.board.add(sprite);
-        row.push({ kind, sprite, r, c });
+        row.push({ kind, sprite, baseScale, r, c });
       }
       this.grid.push(row);
     }
@@ -1016,7 +1037,7 @@ export class GameScene extends Phaser.Scene {
     this.clearSelection();
     this.selected = g;
     sfx.play('tap');
-    g.sprite.setScale(0.68);
+    g.sprite.setScale(g.baseScale * 1.13);
     const { x, y } = this.gemXY(g.r, g.c);
     this.ring.setPosition(x, y).setVisible(true).setScale(0.72);
     this.tweens.add({
@@ -1032,7 +1053,7 @@ export class GameScene extends Phaser.Scene {
   private clearSelection(): void {
     this.tweens.killTweensOf(this.ring);
     this.ring.setVisible(false);
-    if (this.selected) this.selected.sprite.setScale(0.6);
+    if (this.selected) this.selected.sprite.setScale(this.selected.baseScale);
     this.selected = null;
   }
 
@@ -1122,6 +1143,11 @@ export class GameScene extends Phaser.Scene {
     if (!this.scene.isActive('GameScene')) return;
     this.updateHUD();
     if (this.goalMet()) {
+      // цель выполнена: остаток ходов превращается в солнечные бомбы
+      if (this.moves > 0) {
+        await this.bonusPhase();
+        if (!this.scene.isActive('GameScene')) return;
+      }
       await this.winSequence();
       return;
     }
@@ -1144,6 +1170,84 @@ export class GameScene extends Phaser.Scene {
     }
     this.locked = false;
     this.resetHintTimer();
+  }
+
+  /** Крупный заголовок по центру поля (на время бонус-фазы). */
+  private banner(str: string, color: string, size = 24): void {
+    const t = this.add
+      .text(GAME_W / 2, 410, str, {
+        fontFamily: RUSSO,
+        fontSize: `${size}px`,
+        color,
+        stroke: '#06281a',
+        strokeThickness: 6,
+      })
+      .setOrigin(0.5)
+      .setDepth(46);
+    this.tweens.add({ targets: t, scale: { from: 0.3, to: 1 }, duration: 240, ease: 'Back.easeOut' });
+    this.tweens.add({ targets: t, alpha: 0, y: 366, delay: 750, duration: 380, onComplete: () => t.destroy() });
+  }
+
+  /**
+   * Финал уровня в стиле Монтесумы: цель уже выполнена, поэтому каждый
+   * оставшийся ход автоматически превращается в «солнечную бомбу», которая
+   * взрывает 3×3 (с цепными детонациями реликвий) и приносит очки —
+   * так можно дотянуть до 2–3 звёзд.
+   */
+  private async bonusPhase(): Promise<void> {
+    this.cancelAim();
+    this.clearSelection();
+    this.hintTimer?.destroy();
+    this.banner('ЦЕЛЬ ВЫПОЛНЕНА!', '#9dffce', 27);
+    sfx.play('star');
+    await this.sleep(700);
+    if (!this.scene.isActive('GameScene')) return;
+    if (this.moves > 0) {
+      this.banner(`ОСТАТОК ХОДОВ: ${this.moves} → БОМБЫ!`, '#ffd76a', 21);
+      sfx.play('boost');
+      await this.sleep(650);
+    }
+    let guard = 0;
+    while (this.moves > 0 && guard++ < 30 && this.scene.isActive('GameScene')) {
+      this.moves--;
+      this.updateHUD();
+      await this.detonateRandomBomb();
+      await this.sleep(90);
+    }
+  }
+
+  /** Одна солнечная бомба: выбираем клетку (приоритет реликвиям) и взрываем. */
+  private async detonateRandomBomb(): Promise<void> {
+    const cells: CellPos[] = [];
+    this.grid.forEach((row, r) =>
+      row.forEach((f, c) => {
+        if (f) cells.push({ r, c });
+      }),
+    );
+    if (!cells.length) return;
+    const specials = cells.filter(({ r, c }) => this.grid[r][c]?.special);
+    const pick =
+      specials.length && Math.random() < 0.75
+        ? specials[Math.floor(Math.random() * specials.length)]
+        : cells[Math.floor(Math.random() * cells.length)];
+    const { x, y } = this.gemXY(pick.r, pick.c);
+
+    const bomb = this.add.image(x, y, 'megabomb').setScale(0.05).setDepth(22);
+    sfx.play('swap');
+    this.tweens.add({ targets: bomb, scale: 0.72, duration: 170, ease: 'Back.easeOut' });
+    this.floatText(x, y - 48, 'БОНУС!', '#ffd76a', 15);
+    await this.sleep(220);
+    if (!this.scene.isActive('GameScene')) {
+      bomb.destroy();
+      return;
+    }
+    const wave = this.collectBlastRemoval(pick.r, pick.c);
+    bomb.destroy();
+    this.cameras.main.shake(150, 0.006);
+    sfx.play('boost');
+    await this.popWave(wave, [], 1);
+    if (!this.scene.isActive('GameScene')) return;
+    await this.collapse();
   }
 
   /** Атака босса: замораживает 3 случайные клетки. */
@@ -1188,7 +1292,24 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // цепные детонации реликвий, задетых волной
+    const detonations = this.expandSpecials(removed);
+    return { removed, spawns, detonations };
+  }
+
+  /** Волна от солнечной бомбы: 3×3 + цепные детонации реликвий. */
+  private collectBlastRemoval(cr: number, cc: number): Wave {
+    const removed = new Set<string>();
+    for (let r = cr - 1; r <= cr + 1; r++) {
+      for (let c = cc - 1; c <= cc + 1; c++) {
+        if (r >= 0 && r < ROWS && c >= 0 && c < COLS && this.grid[r][c]) removed.add(`${r},${c}`);
+      }
+    }
+    const detonations = this.expandSpecials(removed);
+    return { removed, spawns: [], detonations };
+  }
+
+  /** Цепные детонации реликвий, задетых волной. Возвращает число сработавших. */
+  private expandSpecials(removed: Set<string>): number {
     const processed = new Set<string>();
     let detonations = 0;
     let changed = true;
@@ -1211,7 +1332,7 @@ export class GameScene extends Phaser.Scene {
             }
           }
         } else {
-          // Око бога стирает самый частый фрукт на поле
+          // Око бога стирает самый частый вид на поле
           const counts = new Map<FruitKind, number>();
           for (let rr = 0; rr < ROWS; rr++) {
             for (let cc = 0; cc < COLS; cc++) {
@@ -1235,7 +1356,7 @@ export class GameScene extends Phaser.Scene {
         }
       }
     }
-    return { removed, spawns, detonations };
+    return detonations;
   }
 
   private async popWave(wave: Wave, groups: MatchGroup[], chain: number): Promise<void> {
@@ -1501,10 +1622,13 @@ export class GameScene extends Phaser.Scene {
         if (this.grid[r][c] || this.obstacleAt(r, c) || this.idolAt(r, c)) continue;
         const kind = this.randomKind();
         const { x, y } = this.gemXY(r, c);
-        const sprite = this.add.image(x, y - (empties - k) * CELL - 30, `fruit_${kind}`).setScale(0.6);
+        const baseScale = this.fitScale(`fruit_${kind}`, 56);
+        const sprite = this.add
+          .image(x, y - (empties - k) * CELL - 30, `fruit_${kind}`)
+          .setScale(baseScale);
         k++;
         this.board.add(sprite);
-        const fruit: FruitObj = { kind, sprite, r, c };
+        const fruit: FruitObj = { kind, sprite, baseScale, r, c };
         this.grid[r][c] = fruit;
         fill.push(this.moveFruit(fruit));
       }
@@ -1999,15 +2123,22 @@ export class GameScene extends Phaser.Scene {
     );
     if (boss) {
       items.push(
-        this.add.text(0, 40, 'Боевые навыки заряжаются фруктами:\nОгонь — яблоками, Молния — бананами,\nВетер — лаймом', {
+        this.add.text(
+          0,
+          40,
+          `Боевые навыки заряжаются кристаллами:\nОгонь — ${FRUIT_NAMES[SKILLS[0].kind]}, Молния — ${FRUIT_NAMES[SKILLS[1].kind]},\nВетер — ${FRUIT_NAMES[SKILLS[2].kind]}`,
+          {
           fontFamily: RUBIK, fontSize: '13px', color: '#8fd8b4', align: 'center',
         }).setOrigin(0.5),
       );
     }
     items.push(
-      this.add.text(0, boss ? 92 : -16, 'Тяни фрукт в сторону соседа\nили коснись двух соседних по очереди', {
-        fontFamily: RUBIK, fontSize: '13.5px', color: '#8fd8b4', align: 'center',
-      }).setOrigin(0.5),
+      this.add.text(
+        0,
+        boss ? 92 : -16,
+        'Тяни кристалл в сторону соседа\nили коснись двух соседних по очереди\n\nВыполнил цель — остаток ходов\nвзорвётся солнечными бомбами!',
+        { fontFamily: RUBIK, fontSize: '13.5px', color: '#8fd8b4', align: 'center' },
+      ).setOrigin(0.5),
     );
     const startBtn = makeButton(this, 'НАЧАТЬ', () => {
       pop.close();

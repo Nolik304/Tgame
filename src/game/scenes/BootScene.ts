@@ -302,6 +302,30 @@ export class BootScene extends Phaser.Scene {
     g.generateTexture('aura_eye', 96, 96);
     g.destroy();
 
+    // «Солнечная бомба» — бонус за остаток ходов в конце уровня
+    g = this.g();
+    g.fillStyle(0xffb020, 0.25);
+    g.fillCircle(48, 48, 44);
+    g.fillStyle(0xffd76a, 1);
+    for (let i = 0; i < 8; i++) {
+      const a = (i * Math.PI) / 4;
+      const x1 = 48 + Math.cos(a) * 20;
+      const y1 = 48 + Math.sin(a) * 20;
+      const x2 = 48 + Math.cos(a) * 42;
+      const y2 = 48 + Math.sin(a) * 42;
+      const px = Math.cos(a + Math.PI / 2) * 5;
+      const py = Math.sin(a + Math.PI / 2) * 5;
+      g.fillTriangle(x1 + px, y1 + py, x1 - px, y1 - py, x2, y2);
+    }
+    g.fillStyle(0xff7a1a, 1);
+    g.fillCircle(48, 48, 24);
+    g.fillStyle(0xffd23e, 1);
+    g.fillCircle(48, 48, 18);
+    g.fillStyle(0xfff0a8, 1);
+    g.fillCircle(42, 42, 7);
+    g.generateTexture('megabomb', 96, 96);
+    g.destroy();
+
     // Подарок «Дар богов»
     g = this.g();
     g.fillStyle(0xb8352c, 1);
@@ -324,16 +348,20 @@ export class BootScene extends Phaser.Scene {
   }
 
   private buildTextures(): void {
-    // ---------- Фрукты (фишки поля) ----------
+    // ---------- Фишки поля (кристаллы) ----------
+    // Если твой PNG (fruits/0.png … 4.png) загрузился — используем его.
+    // Иначе рисуем красивый процедурный самоцвет, чтобы на поле никогда
+    // не было «зелёных квадратов» пропавшей текстуры.
     for (const kind of FRUIT_KINDS) {
-      if (!this.failed.has(`fruit_${kind}`)) continue; // загружен твой спрайт
+      const key = `fruit_${kind}`;
+      if (this.textures.exists(key)) continue; // твой спрайт на месте
       const c = FRUIT_COLORS[kind];
       const g = this.g();
       this.drawFruit(g, kind, c);
-      g.generateTexture(`fruit_${kind}`, 96, 96);
+      g.generateTexture(key, 96, 96);
       g.destroy();
     }
-    if (this.failed.has('fruitIcon')) {
+    if (!this.textures.exists('fruitIcon')) {
       const b = this.g();
       b.fillStyle(0xc98a12, 1);
       b.fillRoundedRect(4, 20, 40, 22, 8);
@@ -500,34 +528,60 @@ export class BootScene extends Phaser.Scene {
 
   // ---------------- Процедурные фрукты ----------------
 
-  /** Универсальный самоцвет-фолбэк (если твой PNG не загрузился). Цвет берётся из FRUIT_COLORS. */
+  /**
+   * Процедурный самоцвет-фолбэк (если твой PNG не загрузился).
+   * У каждого из 5 видов — своя форма огранки, чтобы фишки легко
+   * различались даже без спрайтов. Цвет берётся из FRUIT_COLORS.
+   */
   private drawFruit(
     g: Phaser.GameObjects.Graphics,
-    _kind: FruitKind,
+    kind: FruitKind,
     c: { main: number; light: number; dark: number },
   ): void {
-    // огранённый камень: тёмная подложка + градиентное тело + блики
-    g.fillStyle(c.dark, 1);
-    g.fillCircle(48, 50, 35);
-    g.fillGradientStyle(c.light, c.light, c.main, c.main, 1);
-    g.fillCircle(46, 48, 32);
-    // грани
-    g.lineStyle(3, c.light, 0.5);
-    g.strokeCircle(46, 48, 22);
-    g.lineStyle(2.5, c.light, 0.4);
-    for (let i = 0; i < 6; i++) {
-      const a = (i * Math.PI) / 3;
-      g.lineBetween(46 + Math.cos(a) * 10, 48 + Math.sin(a) * 10, 46 + Math.cos(a) * 30, 48 + Math.sin(a) * 30);
+    const V = (x: number, y: number) => new Phaser.Math.Vector2(x, y);
+    // силуэт под каждый вид
+    let outline: Phaser.Math.Vector2[];
+    switch (kind) {
+      case '0': // круглый бриллиант
+        outline = [V(30, 22), V(66, 22), V(84, 46), V(48, 86), V(12, 46)];
+        break;
+      case '1': // изумрудная огранка (восьмиугольник)
+        outline = [V(30, 16), V(66, 16), V(80, 30), V(80, 66), V(66, 80), V(30, 80), V(16, 66), V(16, 30)];
+        break;
+      case '2': // трапеция-щит
+        outline = [V(24, 20), V(72, 20), V(82, 44), V(48, 86), V(14, 44)];
+        break;
+      case '3': // шестиугольник
+        outline = [V(48, 12), V(82, 30), V(82, 66), V(48, 84), V(14, 66), V(14, 30)];
+        break;
+      default: // сердце
+        outline = [V(48, 84), V(16, 52), V(14, 32), V(30, 18), V(48, 30), V(66, 18), V(82, 32), V(80, 52)];
+        break;
     }
-    // центральный блик
-    g.fillStyle(0xffffff, 0.55);
-    g.fillCircle(38, 40, 6);
-    g.fillStyle(0xffffff, 0.3);
-    g.fillCircle(52, 34, 3);
-    // контур-обводка
-    g.lineStyle(5, 0xffffff, 0.35);
+    // мягкое свечение + тёмная подложка
+    g.fillStyle(c.light, 0.16);
+    g.fillCircle(48, 50, 42);
+    g.fillStyle(c.dark, 1);
+    g.fillPoints(outline, true);
+    // корпус с градиентом (чуть меньше силуэта)
+    const inner = outline.map((p) => V(48 + (p.x - 48) * 0.9, 50 + (p.y - 50) * 0.9));
+    g.fillGradientStyle(c.light, c.light, c.main, c.main, 1);
+    g.fillPoints(inner, true);
+    // фаски: лучи от центра к вершинам
+    g.lineStyle(2.5, c.dark, 0.55);
+    for (const p of inner) g.lineBetween(48, 50, p.x, p.y);
+    // площадка-блик сверху
+    g.fillStyle(c.light, 0.55);
+    g.fillPoints([V(38, 26), V(58, 26), V(64, 36), V(48, 44), V(32, 36)], true);
+    // искры
+    g.fillStyle(0xffffff, 0.8);
+    g.fillTriangle(36, 30, 39, 37, 33, 37);
+    g.fillStyle(0xffffff, 0.5);
+    g.fillCircle(60, 30, 3);
+    // обводка-дуга
+    g.lineStyle(4, 0xffffff, 0.4);
     g.beginPath();
-    g.arc(42, 42, 26, 195, 250);
+    g.arc(44, 42, 24, 195, 248);
     g.strokePath();
   }
 
@@ -626,10 +680,16 @@ export class BootScene extends Phaser.Scene {
       .setShadow(0, 5, '#000000', 10);
     this.tweens.add({ targets: [title1, title2], y: '-=8', duration: 1600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
 
-    // ряд фруктов
+    // ряд кристаллов
     FRUIT_KINDS.forEach((kind, i) => {
       const x = 70 + i * 80;
-      const spr = this.add.image(x, 840, `fruit_${kind}`).setScale(0.52);
+      const key = `fruit_${kind}`;
+      const tex = this.textures.get(key);
+      const w =
+        tex && tex.key !== '__MISSING'
+          ? (tex.getSourceImage() as HTMLImageElement | HTMLCanvasElement)?.width || 96
+          : 96;
+      const spr = this.add.image(x, 840, key).setScale(50 / w);
       this.tweens.add({
         targets: spr,
         y: 830,
