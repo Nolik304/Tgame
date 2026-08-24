@@ -1,477 +1,475 @@
 // ============================================================
-// BootScene: процедурная генерация ВСЕХ текстур (без ассетов),
-// splash-экран «нажми, чтобы начать» → разблокировка WebAudio,
-// инициализация VK Bridge и переход на карту.
+// BootScene:
+//  1) подгружает ТВОИ спрайты фруктов из public/fruits/*.png
+//     (если файла нет — рисуется процедурный фолбэк);
+//  2) генерирует остальные процедурные текстуры (иконки навыков,
+//     сундуки, свечения, частицы, виньетка...);
+//  3) показывает splash-экран «Лестница Бога» и по первому
+//     касанию разблокирует WebAudio, инициализирует VK Bridge
+//     и загружает профиль игрока.
 // ============================================================
 import Phaser from 'phaser';
-import { GAME_W, GAME_H, GEM_KINDS, GEM_COLORS, type GemKind } from '../data/gameData';
+import { GAME_W, GAME_H, FRUIT_KINDS, FRUIT_COLORS, type FruitKind } from '../data/gameData';
 import { sfx } from '../services/SoundManager';
 import { vk } from '../services/VKBridgeService';
 import { playerState } from '../services/PlayerState';
 
-type Pt = [number, number];
-
-const GEM_SHAPES: Record<GemKind, Pt[] | 'circle'> = {
-  ruby: [[48, 6], [90, 48], [48, 90], [6, 48]],
-  emerald: [[48, 6], [84, 27], [84, 69], [48, 90], [12, 69], [12, 27]],
-  sapphire: [[30, 8], [66, 8], [88, 30], [88, 66], [66, 88], [30, 88], [8, 66], [8, 30]],
-  topaz: [[48, 8], [90, 84], [6, 84]],
-  amethyst: [[48, 4], [82, 38], [48, 92], [14, 38]],
-  jade: 'circle',
-};
+type Pt = { x: number; y: number };
 
 export class BootScene extends Phaser.Scene {
+  private failed = new Set<string>();
+
   constructor() {
     super('BootScene');
   }
 
-  async create(): Promise<void> {
-    try {
-      await Promise.race([
-        document.fonts.ready,
-        new Promise((r) => setTimeout(r, 1600)),
-      ]);
-    } catch {
-      /* системные шрифты */
-    }
-
-    this.buildTextures();
-    this.buildSplash();
+  preload(): void {
+    // Кастомные спрайты игрока: положи свои PNG в public/fruits/
+    // (apple.png, orange.png, grape.png, banana.png, lime.png, berry.png, icon.png).
+    this.load.on('loaderror', (file: Phaser.Loader.File) => this.failed.add(file.key));
+    for (const k of FRUIT_KINDS) this.load.image(`fruit_${k}`, `fruits/${k}.png`);
+    this.load.image('fruitIcon', 'fruits/icon.png');
   }
 
-  // ---------------- Текстуры ----------------
+  create(): void {
+    this.buildTextures();
+    this.showSplash();
+  }
 
   private g(): Phaser.GameObjects.Graphics {
     return this.make.graphics({}, false);
   }
 
-  private poly(g: Phaser.GameObjects.Graphics, pts: Pt[]): void {
-    g.beginPath();
-    pts.forEach(([x, y], i) => (i === 0 ? g.moveTo(x, y) : g.lineTo(x, y)));
-    g.closePath();
-  }
-
   private buildTextures(): void {
-    // Самоцветы
-    for (const kind of GEM_KINDS) {
-      const c = GEM_COLORS[kind];
+    // ---------- Фрукты (фишки поля) ----------
+    for (const kind of FRUIT_KINDS) {
+      if (!this.failed.has(`fruit_${kind}`)) continue; // загружен твой спрайт
+      const c = FRUIT_COLORS[kind];
       const g = this.g();
-      const shape = GEM_SHAPES[kind];
-      g.fillGradientStyle(c.light, c.light, c.main, c.main, 1);
-      if (shape === 'circle') {
-        g.fillCircle(48, 48, 40);
-        g.lineStyle(5, c.dark, 1);
-        g.strokeCircle(48, 48, 38);
-        g.fillStyle(0xffffff, 0.25);
-        g.fillEllipse(40, 32, 40, 24);
-      } else {
-        this.poly(g, shape);
-        g.fillPath();
-        g.lineStyle(5, c.dark, 1);
-        this.poly(g, shape);
-        g.strokePath();
-        const facet = shape.map(([x, y]) => [48 + (x - 48) * 0.52, 44 + (y - 48) * 0.52] as Pt);
-        g.fillStyle(0xffffff, 0.22);
-        this.poly(g, facet);
-        g.fillPath();
-      }
-      g.fillStyle(0xffffff, 0.9);
-      g.fillCircle(33, 29, 5);
-      g.fillStyle(0xffffff, 0.55);
-      g.fillCircle(42, 22, 2.6);
-      g.generateTexture(`gem_${kind}`, 96, 96);
+      this.drawFruit(g, kind, c);
+      g.generateTexture(`fruit_${kind}`, 96, 96);
       g.destroy();
     }
+    if (this.failed.has('fruitIcon')) {
+      const b = this.g();
+      b.fillStyle(0xc98a12, 1);
+      b.fillRoundedRect(4, 20, 40, 22, 8);
+      b.lineStyle(3, 0xf5b52e, 1);
+      b.strokeRoundedRect(4, 20, 40, 22, 8);
+      b.fillStyle(0xe8384f, 1);
+      b.fillCircle(16, 16, 7);
+      b.fillStyle(0x7ed321, 1);
+      b.fillCircle(30, 14, 7);
+      b.fillStyle(0xb06bff, 1);
+      b.fillCircle(23, 22, 6);
+      b.generateTexture('fruitIcon', 48, 48);
+      b.destroy();
+    }
 
-    // Искры/частицы
-    let s = this.g();
-    s.fillStyle(0xffffff, 1);
-    s.fillCircle(8, 8, 8);
-    s.fillStyle(0xffffff, 0.5);
-    s.fillCircle(8, 8, 5);
-    s.generateTexture('spark', 16, 16);
-    s.destroy();
+    // ---------- Иконки боевых навыков ----------
+    this.genSkillFire();
+    this.genSkillBolt();
+    this.genSkillWind();
 
-    // Мягкое свечение
-    s = this.g();
-    const glowAlphas = [0.04, 0.05, 0.06, 0.08, 0.1, 0.14];
-    glowAlphas.forEach((a, i) => {
-      s.fillStyle(0xfff2b0, a);
-      s.fillCircle(64, 64, 62 - i * 10);
-    });
-    s.generateTexture('glow', 128, 128);
-    s.destroy();
+    // ---------- Сердце ----------
+    const h = this.g();
+    h.fillStyle(0xff4b5c, 1);
+    h.fillCircle(16, 14, 10);
+    h.fillCircle(32, 14, 10);
+    h.fillTriangle(6, 18, 42, 18, 24, 42);
+    h.fillStyle(0xffffff, 0.35);
+    h.fillCircle(13, 11, 4);
+    h.generateTexture('heart', 48, 48);
+    h.destroy();
 
-    // Монета
-    s = this.g();
-    s.fillGradientStyle(0xffe493, 0xffe493, 0xf0a51c, 0xf0a51c, 1);
-    s.fillCircle(24, 24, 21);
-    s.lineStyle(3.5, 0x8a5a08, 1);
-    s.strokeCircle(24, 24, 19);
-    s.lineStyle(2, 0x8a5a08, 0.65);
-    s.strokeCircle(24, 24, 12);
-    s.fillStyle(0x8a5a08, 0.9);
-    s.fillCircle(24, 24, 4.5);
-    s.fillStyle(0xffffff, 0.7);
-    s.fillCircle(17, 16, 3.5);
-    s.generateTexture('coin', 48, 48);
-    s.destroy();
+    // ---------- Монета ----------
+    const coin = this.g();
+    coin.fillStyle(0xc98a12, 1);
+    coin.fillCircle(24, 24, 21);
+    coin.fillStyle(0xffd34d, 1);
+    coin.fillCircle(24, 24, 17);
+    coin.lineStyle(3, 0xb8791a, 1);
+    coin.strokeCircle(24, 24, 12);
+    coin.fillStyle(0xc98a12, 1);
+    coin.fillRoundedRect(20, 14, 8, 20, 3);
+    coin.generateTexture('coin', 48, 48);
+    coin.destroy();
 
-    // Гем (валюта)
-    s = this.g();
-    s.fillGradientStyle(0xb0fff4, 0xb0fff4, 0x2ab8a8, 0x2ab8a8, 1);
-    this.poly(s, [[24, 2], [44, 16], [36, 44], [12, 44], [4, 16]]);
-    s.fillPath();
-    s.lineStyle(3, 0x0f6e63, 1);
-    this.poly(s, [[24, 2], [44, 16], [36, 44], [12, 44], [4, 16]]);
-    s.strokePath();
-    s.fillStyle(0xffffff, 0.6);
+    // ---------- Гем (премиум-валюта) ----------
+    const s = this.g();
+    const V2 = (x: number, y: number) => new Phaser.Math.Vector2(x, y);
+    s.fillStyle(0x17c98d, 1);
+    s.fillPoints([V2(24, 3), V2(45, 24), V2(24, 45), V2(3, 24)], true);
+    s.fillStyle(0x8dffe0, 1);
+    s.fillPoints([V2(24, 10), V2(36, 24), V2(24, 38), V2(12, 24)], true);
+    s.fillStyle(0xffffff, 0.85);
     s.fillCircle(19, 15, 3);
     s.generateTexture('gemIcon', 48, 48);
     s.destroy();
 
-    // Сердце (жизни)
-    s = this.g();
-    s.fillGradientStyle(0xff97a8, 0xff97a8, 0xe8384f, 0xe8384f, 1);
-    s.fillCircle(17, 17, 11);
-    s.fillCircle(31, 17, 11);
-    this.poly(s, [[6.5, 21], [41.5, 21], [24, 43]]);
-    s.fillPath();
-    s.lineStyle(3, 0x8f0f26, 1);
-    s.strokeCircle(17, 17, 10);
-    s.strokeCircle(31, 17, 10);
-    s.fillStyle(0xffffff, 0.65);
-    s.fillCircle(15, 13, 3.5);
-    s.generateTexture('heart', 48, 48);
-    s.destroy();
+    // ---------- Замок ----------
+    const lock = this.g();
+    lock.lineStyle(7, 0x93a196, 1);
+    lock.strokeCircle(24, 16, 10);
+    lock.fillStyle(0x8d9b90, 1);
+    lock.fillRoundedRect(6, 20, 36, 26, 6);
+    lock.fillStyle(0x2c342e, 1);
+    lock.fillCircle(24, 31, 4.5);
+    lock.fillRoundedRect(21.5, 31, 5, 9, 2);
+    lock.generateTexture('lock', 48, 48);
+    lock.destroy();
 
-    // Замок
-    s = this.g();
-    s.lineStyle(5, 0x93a29a, 1);
-    s.beginPath();
-    s.arc(22, 20, 10, Math.PI, 0);
-    s.strokePath();
-    s.fillGradientStyle(0xb9c4bd, 0xb9c4bd, 0x6e7d74, 0x6e7d74, 1);
-    s.fillRoundedRect(10, 19, 24, 20, 5);
-    s.lineStyle(2.5, 0x39453e, 1);
-    s.strokeRoundedRect(10, 19, 24, 20, 5);
-    s.fillStyle(0x2c3831, 1);
-    s.fillCircle(22, 28, 3.4);
-    s.fillRect(20.6, 29, 2.8, 6);
-    s.generateTexture('lock', 44, 44);
-    s.destroy();
-
-    // Череп босса
-    s = this.g();
-    s.fillGradientStyle(0xf2ead6, 0xf2ead6, 0xb9ad87, 0xb9ad87, 1);
-    s.fillCircle(28, 23, 17);
-    s.fillRoundedRect(19, 34, 18, 12, 4);
-    s.lineStyle(3, 0x5d5138, 1);
-    s.strokeCircle(28, 23, 16);
-    s.fillStyle(0x241c0e, 1);
-    s.fillCircle(21, 23, 5);
-    s.fillCircle(35, 23, 5);
-    this.poly(s, [[28, 27], [31, 32], [25, 32]]);
-    s.fillPath();
-    s.fillStyle(0x5d5138, 1);
-    [22, 27, 32].forEach((x) => s.fillRect(x, 38, 2.4, 7));
-    s.generateTexture('skull', 56, 56);
-    s.destroy();
-
-    // Сундук
-    s = this.g();
-    s.fillGradientStyle(0xa8703a, 0xa8703a, 0x5d3a17, 0x5d3a17, 1);
-    s.fillRoundedRect(8, 30, 56, 36, 6);
-    s.fillGradientStyle(0xc98a4a, 0xc98a4a, 0x7a4c20, 0x7a4c20, 1);
-    s.fillRoundedRect(8, 14, 56, 22, 9);
-    s.lineStyle(3, 0x3a230c, 1);
-    s.strokeRoundedRect(8, 14, 56, 52, 9);
-    s.fillStyle(0xf5b52e, 1);
-    s.fillRect(18, 14, 7, 52);
-    s.fillRect(47, 14, 7, 52);
-    s.lineStyle(2, 0x8a5a08, 1);
-    s.strokeRect(18, 14, 7, 52);
-    s.strokeRect(47, 14, 7, 52);
-    s.fillStyle(0xffd76a, 1);
-    s.fillCircle(36, 40, 8);
-    s.fillStyle(0x3a230c, 1);
-    s.fillCircle(36, 39, 2.6);
-    s.fillRect(34.8, 40, 2.4, 5);
-    s.generateTexture('chest', 72, 72);
-    s.destroy();
-
-    // Шестерёнка
-    s = this.g();
-    for (let i = 0; i < 8; i++) {
-      const a = (i / 8) * Math.PI * 2;
-      const cx = 22 + Math.cos(a) * 16;
-      const cy = 22 + Math.sin(a) * 16;
-      s.fillStyle(0xc9a04e, 1);
-      s.fillCircle(cx, cy, 4.6);
-    }
-    s.fillGradientStyle(0xf0d9a0, 0xf0d9a0, 0xc9a04e, 0xc9a04e, 1);
-    s.fillCircle(22, 22, 14);
-    s.lineStyle(2.5, 0x6e5518, 1);
-    s.strokeCircle(22, 22, 13);
-    s.fillStyle(0x4c3a10, 1);
-    s.fillCircle(22, 22, 5);
-    s.generateTexture('gear', 44, 44);
-    s.destroy();
-
-    // Мешочек магазина
-    s = this.g();
-    s.lineStyle(4, 0x8a5a08, 1);
-    s.beginPath();
-    s.arc(22, 15, 7, Math.PI, 0);
-    s.strokePath();
-    s.fillGradientStyle(0xe8b84a, 0xe8b84a, 0x9c6a14, 0x9c6a14, 1);
-    s.fillRoundedRect(8, 15, 28, 24, 7);
-    s.lineStyle(2.5, 0x6e4a0a, 1);
-    s.strokeRoundedRect(8, 15, 28, 24, 7);
-    s.fillStyle(0xffe493, 1);
-    s.fillCircle(22, 27, 5.5);
-    s.lineStyle(1.6, 0x8a5a08, 1);
-    s.strokeCircle(22, 27, 5.5);
-    s.generateTexture('bag', 44, 44);
-    s.destroy();
-
-    // Звезда
-    s = this.g();
-    const starPts: Pt[] = [];
+    // ---------- Звезда ----------
+    const st = this.g();
+    st.fillStyle(0xffd76a, 1);
+    const pts: Phaser.Math.Vector2[] = [];
     for (let i = 0; i < 10; i++) {
-      const r = i % 2 === 0 ? 21 : 9;
-      const a = -Math.PI / 2 + (i / 10) * Math.PI * 2;
-      starPts.push([24 + Math.cos(a) * r, 24 + Math.sin(a) * r]);
+      const r = i % 2 === 0 ? 22 : 9.5;
+      const a = -Math.PI / 2 + (i * Math.PI) / 5;
+      pts.push(new Phaser.Math.Vector2(24 + r * Math.cos(a), 24 + r * Math.sin(a)));
     }
-    s.fillGradientStyle(0xffe493, 0xffe493, 0xf0a51c, 0xf0a51c, 1);
-    this.poly(s, starPts);
-    s.fillPath();
-    s.lineStyle(2.5, 0x8a5a08, 1);
-    this.poly(s, starPts);
-    s.strokePath();
-    s.generateTexture('star', 48, 48);
-    s.destroy();
+    st.fillPoints(pts, true);
+    st.fillStyle(0xfff2b8, 1);
+    st.fillCircle(20, 18, 4);
+    st.generateTexture('star', 48, 48);
+    st.destroy();
 
-    // Лист
-    s = this.g();
-    s.fillGradientStyle(0x3f8f5a, 0x3f8f5a, 0x1d4a2e, 0x1d4a2e, 1);
-    this.poly(s, [[36, 2], [60, 26], [52, 52], [36, 70], [20, 52], [12, 26]]);
-    s.fillPath();
-    s.lineStyle(2.5, 0x123321, 1);
-    this.poly(s, [[36, 2], [60, 26], [52, 52], [36, 70], [20, 52], [12, 26]]);
-    s.strokePath();
-    s.lineStyle(2, 0x57b878, 0.6);
-    s.lineBetween(36, 8, 36, 64);
-    s.generateTexture('leaf', 72, 72);
-    s.destroy();
+    // ---------- Сундук ----------
+    const ch = this.g();
+    ch.fillStyle(0x6b4318, 1);
+    ch.fillRoundedRect(4, 30, 88, 58, 8);
+    ch.fillStyle(0x8a5a24, 1);
+    ch.fillRoundedRect(4, 14, 88, 34, { tl: 26, tr: 26, bl: 0, br: 0 });
+    ch.fillStyle(0xf5b52e, 1);
+    ch.fillRect(4, 44, 88, 6);
+    ch.fillRect(14, 14, 7, 74);
+    ch.fillRect(75, 14, 7, 74);
+    ch.fillStyle(0xffd76a, 1);
+    ch.fillRoundedRect(38, 40, 20, 26, 4);
+    ch.fillStyle(0x6b4318, 1);
+    ch.fillCircle(48, 51, 4);
+    ch.generateTexture('chest', 96, 96);
+    ch.destroy();
 
-    // Пунктирное кольцо (текущий узел / выделение)
-    s = this.g();
-    s.lineStyle(6, 0xffd76a, 0.95);
-    for (let i = 0; i < 6; i++) {
-      s.beginPath();
-      s.arc(56, 56, 46, i * (Math.PI / 3) + 0.18, (i + 1) * (Math.PI / 3) - 0.18);
-      s.strokePath();
+    // ---------- Череп босса ----------
+    const sk = this.g();
+    sk.fillStyle(0xd9dde2, 1);
+    sk.fillCircle(32, 26, 20);
+    sk.fillRoundedRect(18, 34, 28, 20, 8);
+    sk.fillStyle(0x1a2126, 1);
+    sk.fillCircle(24, 26, 6.5);
+    sk.fillCircle(40, 26, 6.5);
+    sk.fillTriangle(32, 30, 28, 38, 36, 38);
+    sk.fillRect(24, 46, 4, 8);
+    sk.fillRect(31, 46, 4, 8);
+    sk.fillRect(38, 46, 4, 8);
+    sk.fillStyle(0xff5a5a, 0.9);
+    sk.fillCircle(24, 26, 2.6);
+    sk.fillCircle(40, 26, 2.6);
+    sk.generateTexture('skull', 64, 64);
+    sk.destroy();
+
+    // ---------- Свечение ----------
+    const glow = this.g();
+    for (let i = 12; i >= 1; i--) {
+      glow.fillStyle(0xffffff, 0.055);
+      glow.fillCircle(64, 64, i * 5.3);
     }
-    s.generateTexture('nodeRing', 112, 112);
-    s.destroy();
+    glow.generateTexture('glow', 128, 128);
+    glow.destroy();
 
-    // Тонкое кольцо выделения самоцвета
-    s = this.g();
-    s.lineStyle(5, 0xffffff, 0.95);
-    s.strokeCircle(48, 48, 40);
-    s.lineStyle(2.5, 0xf5b52e, 1);
-    s.strokeCircle(48, 48, 44);
-    s.generateTexture('ring', 96, 96);
-    s.destroy();
+    // ---------- Частица-искра ----------
+    const sp = this.g();
+    sp.fillStyle(0xffffff, 1);
+    sp.fillCircle(8, 8, 7);
+    sp.fillStyle(0xffffff, 0.55);
+    sp.fillCircle(8, 8, 4);
+    sp.generateTexture('spark', 16, 16);
+    sp.destroy();
 
-    // Стрелка «ты здесь»
-    s = this.g();
-    s.fillStyle(0xffd76a, 1);
-    this.poly(s, [[16, 28], [3, 8], [29, 8]]);
-    s.fillPath();
-    s.lineStyle(2.5, 0x8a5a08, 1);
-    this.poly(s, [[16, 28], [3, 8], [29, 8]]);
-    s.strokePath();
-    s.generateTexture('arrow', 32, 32);
-    s.destroy();
+    // ---------- Пылинка (фон карты) ----------
+    const m = this.g();
+    m.fillStyle(0xffffff, 0.9);
+    m.fillCircle(5, 5, 4);
+    m.fillStyle(0xffffff, 0.35);
+    m.fillCircle(5, 5, 2);
+    m.generateTexture('mote', 10, 10);
+    m.destroy();
 
-    // Кубок (цель по очкам)
-    s = this.g();
-    s.fillGradientStyle(0xffe493, 0xffe493, 0xf0a51c, 0xf0a51c, 1);
-    s.beginPath();
-    s.arc(24, 14, 13, 0, Math.PI);
-    s.closePath();
-    s.fillPath();
-    s.fillRect(11, 12, 26, 5);
-    s.fillRect(21, 26, 6, 9);
-    s.fillRect(14, 35, 20, 5);
-    s.lineStyle(3.5, 0xf0a51c, 1);
-    s.beginPath();
-    s.arc(8, 15, 6, Math.PI * 0.5, Math.PI * 1.5);
-    s.strokePath();
-    s.beginPath();
-    s.arc(40, 15, 6, -Math.PI * 0.5, Math.PI * 0.5);
-    s.strokePath();
-    s.lineStyle(2, 0x8a5a08, 1);
-    s.strokeRect(14, 35, 20, 5);
-    s.generateTexture('trophy', 48, 48);
-    s.destroy();
+    // ---------- Кольцо выделения ----------
+    const rg = this.g();
+    rg.lineStyle(5, 0xffffff, 0.95);
+    rg.strokeCircle(48, 48, 40);
+    rg.lineStyle(2, 0xffffff, 0.4);
+    rg.strokeCircle(48, 48, 33);
+    rg.generateTexture('ring', 96, 96);
+    rg.destroy();
 
-    // Виньетка экрана
-    s = this.g();
-    const dark = 0x04120a;
-    s.fillGradientStyle(dark, dark, dark, dark, 0.5, 0.5, 0, 0);
-    s.fillRect(0, 0, GAME_W, 210);
-    s.fillGradientStyle(dark, dark, dark, dark, 0, 0, 0.6, 0.6);
-    s.fillRect(0, GAME_H - 240, GAME_W, 240);
-    s.fillGradientStyle(dark, dark, dark, dark, 0.4, 0, 0, 0.4);
-    s.fillRect(0, 0, 90, GAME_H);
-    s.fillGradientStyle(dark, dark, dark, dark, 0, 0.4, 0.4, 0);
-    s.fillRect(GAME_W - 90, 0, 90, GAME_H);
-    s.generateTexture('vignette', GAME_W, GAME_H);
-    s.destroy();
+    // ---------- Виньетка ----------
+    const v = this.g();
+    for (let i = 0; i < 26; i++) {
+      v.fillStyle(0x000000, 0.028);
+      v.fillRoundedRect(i * 6, i * 6, GAME_W - i * 12, GAME_H - i * 12, 20);
+    }
+    v.generateTexture('vignette', GAME_W, GAME_H);
+    v.destroy();
+  }
+
+  // ---------------- Процедурные фрукты ----------------
+
+  private drawFruit(
+    g: Phaser.GameObjects.Graphics,
+    kind: FruitKind,
+    c: { main: number; light: number; dark: number },
+  ): void {
+    switch (kind) {
+      case 'apple': {
+        g.fillStyle(c.dark, 1);
+        g.fillCircle(48, 56, 34);
+        g.fillGradientStyle(c.light, c.light, c.main, c.main, 1);
+        g.fillCircle(46, 54, 31);
+        g.fillStyle(0x8a5a2a, 1);
+        g.fillRoundedRect(45, 12, 6, 16, 3);
+        g.fillStyle(0x4caf50, 1);
+        g.fillTriangle(52, 16, 78, 10, 62, 30);
+        g.lineStyle(6, 0xffffff, 0.5);
+        g.beginPath();
+        g.arc(40, 48, 20, 190, 250);
+        g.strokePath();
+        break;
+      }
+      case 'orange': {
+        g.fillStyle(c.dark, 1);
+        g.fillCircle(48, 54, 34);
+        g.fillGradientStyle(c.light, c.light, c.main, c.main, 1);
+        g.fillCircle(46, 52, 31);
+        g.fillStyle(c.dark, 0.5);
+        for (let i = 0; i < 9; i++) {
+          const a = i * 0.7;
+          g.fillCircle(46 + Math.cos(a * 2.4) * 18, 52 + Math.sin(a * 3.1) * 18, 1.8);
+        }
+        g.fillStyle(0x4caf50, 1);
+        g.fillTriangle(44, 16, 66, 8, 56, 26);
+        g.lineStyle(6, 0xffffff, 0.5);
+        g.beginPath();
+        g.arc(40, 46, 20, 190, 250);
+        g.strokePath();
+        break;
+      }
+      case 'grape': {
+        const berries: Pt[] = [
+          { x: 36, y: 36 }, { x: 60, y: 36 }, { x: 24, y: 52 }, { x: 48, y: 50 },
+          { x: 72, y: 52 }, { x: 36, y: 66 }, { x: 60, y: 66 }, { x: 48, y: 80 },
+        ];
+        g.fillStyle(0x4caf50, 1);
+        g.fillTriangle(40, 14, 66, 8, 54, 26);
+        g.fillStyle(0x8a5a2a, 1);
+        g.fillRoundedRect(45, 14, 5, 12, 2);
+        for (const p of berries) {
+          g.fillStyle(c.dark, 1);
+          g.fillCircle(p.x, p.y, 13.5);
+          g.fillStyle(c.main, 1);
+          g.fillCircle(p.x - 1.5, p.y - 1.5, 11.5);
+          g.fillStyle(c.light, 0.7);
+          g.fillCircle(p.x - 4, p.y - 4, 3);
+        }
+        break;
+      }
+      case 'banana': {
+        g.lineStyle(22, c.dark, 1);
+        g.beginPath();
+        g.arc(48, 28, 30, 40, 140);
+        g.strokePath();
+        g.lineStyle(17, c.main, 1);
+        g.beginPath();
+        g.arc(48, 27, 30, 42, 138);
+        g.strokePath();
+        g.lineStyle(6, c.light, 0.8);
+        g.beginPath();
+        g.arc(48, 26, 30, 65, 115);
+        g.strokePath();
+        g.fillStyle(0x8a5a2a, 1);
+        g.fillCircle(71, 47, 5);
+        g.fillCircle(25, 47, 5);
+        break;
+      }
+      case 'lime': {
+        g.fillStyle(0x3f8f14, 1);
+        g.fillCircle(48, 50, 35);
+        g.fillStyle(0xd9f5a3, 1);
+        g.fillCircle(48, 50, 29);
+        g.lineStyle(4, 0xf7ffe0, 1);
+        for (let i = 0; i < 6; i++) {
+          const a = (i * Math.PI) / 3;
+          g.lineBetween(48, 50, 48 + Math.cos(a) * 26, 50 + Math.sin(a) * 26);
+        }
+        g.fillStyle(0xf7ffe0, 1);
+        g.fillCircle(48, 50, 5);
+        g.lineStyle(5, 0xffffff, 0.45);
+        g.beginPath();
+        g.arc(44, 44, 26, 195, 245);
+        g.strokePath();
+        break;
+      }
+      case 'berry': {
+        g.fillStyle(c.dark, 1);
+        g.fillCircle(48, 56, 32);
+        g.fillGradientStyle(c.light, c.light, c.main, c.main, 1);
+        g.fillCircle(46, 54, 29);
+        g.fillStyle(0x2c3a6e, 1);
+        const crown: Phaser.Math.Vector2[] = [];
+        for (let i = 0; i < 5; i++) {
+          const a = -Math.PI / 2 + (i * Math.PI * 2) / 5;
+          crown.push(new Phaser.Math.Vector2(48 + Math.cos(a) * 7, 26 + Math.sin(a) * 7));
+        }
+        g.fillPoints(crown, true);
+        g.lineStyle(6, 0xffffff, 0.5);
+        g.beginPath();
+        g.arc(40, 48, 19, 190, 250);
+        g.strokePath();
+        break;
+      }
+    }
+  }
+
+  // ---------------- Иконки навыков ----------------
+
+  private genSkillFire(): void {
+    const g = this.g();
+    g.fillStyle(0xff7a2a, 0.22);
+    g.fillCircle(32, 34, 29);
+    g.fillStyle(0xff7a2a, 1);
+    g.fillTriangle(32, 4, 52, 40, 12, 40);
+    g.fillCircle(32, 44, 15);
+    g.fillStyle(0xffd23e, 1);
+    g.fillTriangle(32, 20, 44, 44, 20, 44);
+    g.fillCircle(32, 46, 9);
+    g.fillStyle(0xfff0a8, 1);
+    g.fillCircle(32, 48, 4);
+    g.generateTexture('skill_fire', 64, 64);
+    g.destroy();
+  }
+
+  private genSkillBolt(): void {
+    const g = this.g();
+    const V = (x: number, y: number) => new Phaser.Math.Vector2(x, y);
+    const bolt: Phaser.Math.Vector2[] = [
+      V(38, 2), V(13, 35), V(27, 35), V(23, 62), V(51, 25), V(35, 25),
+    ];
+    g.fillStyle(0xffe24a, 0.22);
+    g.fillCircle(32, 32, 29);
+    g.fillStyle(0xffe24a, 1);
+    g.fillPoints(bolt, true);
+    g.lineStyle(3, 0xb08a00, 1);
+    g.strokePoints(bolt, true);
+    g.generateTexture('skill_bolt', 64, 64);
+    g.destroy();
+  }
+
+  private genSkillWind(): void {
+    const g = this.g();
+    g.fillStyle(0x9dffce, 0.16);
+    g.fillCircle(32, 32, 29);
+    g.lineStyle(6, 0x9dffce, 1);
+    g.beginPath();
+    g.arc(30, 32, 9, -100, 130);
+    g.strokePath();
+    g.beginPath();
+    g.arc(32, 32, 17, -70, 160);
+    g.strokePath();
+    g.lineStyle(5, 0x4ddba0, 1);
+    g.beginPath();
+    g.arc(34, 32, 25, -40, 190);
+    g.strokePath();
+    g.fillStyle(0xeafff5, 1);
+    g.fillCircle(30, 32, 3.4);
+    g.generateTexture('skill_wind', 64, 64);
+    g.destroy();
   }
 
   // ---------------- Splash ----------------
 
-  private buildSplash(): void {
+  private showSplash(): void {
     const bg = this.add.graphics();
-    bg.fillGradientStyle(0x0f3320, 0x0f3320, 0x061410, 0x061410, 1);
+    bg.fillGradientStyle(0x0d2818, 0x0d2818, 0x050f0a, 0x050f0a, 1);
     bg.fillRect(0, 0, GAME_W, GAME_H);
+    bg.fillStyle(0xf5b52e, 0.06);
+    bg.fillCircle(GAME_W / 2, 300, 260);
 
-    // силуэт пирамиды
-    const sil = this.add.graphics();
-    sil.fillStyle(0x0a2314, 1);
-    for (let step = 0; step < 6; step++) {
-      const w = 460 - step * 62;
-      const y = GAME_H - 60 - step * 46;
-      sil.fillRect((GAME_W - w) / 2, y, w, 46);
+    const glow = this.add.image(GAME_W / 2, 296, 'glow').setTint(0xf5b52e).setScale(2.6).setAlpha(0.8);
+    this.tweens.add({ targets: glow, scale: 3, alpha: 0.55, duration: 1400, yoyo: true, repeat: -1 });
+
+    // силуэт лестницы-пирамиды
+    const pyr = this.add.graphics();
+    pyr.fillStyle(0x123724, 1);
+    for (let i = 0; i < 6; i++) {
+      const w = 320 - i * 44;
+      pyr.fillRect(GAME_W / 2 - w / 2, 700 - i * 52, w, 50);
     }
-    sil.fillStyle(0x0d2b19, 1);
-    this.poly(sil, [[0, GAME_H], [0, 700], [150, GAME_H]]);
-    sil.fillPath();
-    this.poly(sil, [[GAME_W, GAME_H], [GAME_W, 640], [GAME_W - 170, GAME_H]]);
-    sil.fillPath();
-    sil.fillStyle(0xf5b52e, 0.08);
-    sil.fillCircle(GAME_W / 2, 300, 210);
-    sil.fillStyle(0xf5b52e, 0.05);
-    sil.fillCircle(GAME_W / 2, 300, 280);
-
-    // светлячки
-    this.add.particles(0, 0, 'spark', {
-      x: { min: 0, max: GAME_W },
-      y: { min: 0, max: GAME_H },
-      lifespan: 4200,
-      speed: { min: 4, max: 16 },
-      angle: { min: 250, max: 290 },
-      scale: { start: 0.35, end: 0 },
-      alpha: { start: 0.55, end: 0 },
-      tint: [0xffe28a, 0x9dffce],
-      frequency: 260,
-      blendMode: 'ADD',
-    });
+    pyr.fillStyle(0xf5b52e, 0.8);
+    pyr.fillTriangle(GAME_W / 2 - 26, 388, GAME_W / 2 + 26, 388, GAME_W / 2, 344);
 
     const title1 = this.add
-      .text(GAME_W / 2, 190, 'СОКРОВИЩА', {
+      .text(GAME_W / 2, 180, 'ЛЕСТНИЦА', {
         fontFamily: '"Russo One"',
-        fontSize: '56px',
-        color: '#f5b52e',
-      })
-      .setOrigin(0.5)
-      .setShadow(0, 5, '#000000', 8);
-    const title2 = this.add
-      .text(GAME_W / 2, 252, 'МОНТЕСУМЫ', {
-        fontFamily: '"Russo One"',
-        fontSize: '44px',
+        fontSize: '54px',
         color: '#f9ecc8',
       })
       .setOrigin(0.5)
-      .setShadow(0, 4, '#000000', 8);
+      .setShadow(0, 5, '#000000', 10);
+    const title2 = this.add
+      .text(GAME_W / 2, 246, 'БОГА', {
+        fontFamily: '"Russo One"',
+        fontSize: '54px',
+        color: '#f5b52e',
+      })
+      .setOrigin(0.5)
+      .setShadow(0, 5, '#000000', 10);
+    this.tweens.add({ targets: [title1, title2], y: '-=8', duration: 1600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
 
-    const deco = this.add.graphics();
-    deco.lineStyle(2, 0xf5b52e, 0.6);
-    deco.lineBetween(GAME_W / 2 - 190, 300, GAME_W / 2 - 30, 300);
-    deco.lineBetween(GAME_W / 2 + 30, 300, GAME_W / 2 + 190, 300);
-    deco.fillStyle(0xf5b52e, 1);
-    deco.beginPath();
-    deco.moveTo(GAME_W / 2, 293);
-    deco.lineTo(GAME_W / 2 + 8, 300);
-    deco.lineTo(GAME_W / 2, 307);
-    deco.lineTo(GAME_W / 2 - 8, 300);
-    deco.closePath();
-    deco.fillPath();
-
-    // ряд самоцветов
-    GEM_KINDS.forEach((kind, i) => {
+    // ряд фруктов
+    FRUIT_KINDS.forEach((kind, i) => {
       const x = 70 + i * 80;
-      const spr = this.add.image(x, 430, `gem_${kind}`).setScale(0.62);
+      const spr = this.add.image(x, 840, `fruit_${kind}`).setScale(0.52);
       this.tweens.add({
         targets: spr,
-        y: 414,
-        duration: 900,
+        y: 830,
+        duration: 900 + i * 120,
         yoyo: true,
         repeat: -1,
         ease: 'Sine.easeInOut',
-        delay: i * 120,
       });
     });
 
-    const prompt = this.add
-      .text(GAME_W / 2, 590, 'НАЖМИ, ЧТОБЫ НАЧАТЬ', {
-        fontFamily: '"Russo One"',
-        fontSize: '25px',
-        color: '#9dffce',
+    const tap = this.add
+      .text(GAME_W / 2, 560, '— коснись, чтобы начать восхождение —', {
+        fontFamily: '"Rubik"',
+        fontSize: '17px',
+        color: '#c9b98f',
       })
       .setOrigin(0.5);
-    this.tweens.add({
-      targets: prompt,
-      alpha: { from: 1, to: 0.25 },
-      duration: 750,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.easeInOut',
-    });
+    this.tweens.add({ targets: tap, alpha: 0.35, duration: 700, yoyo: true, repeat: -1 });
 
     this.add
-      .text(GAME_W / 2, GAME_H - 60, '24 уровня · 3 главы · боссы и сундуки', {
+      .text(GAME_W / 2, 926, 'три в ряд · VK Mini Apps', {
         fontFamily: '"Rubik"',
-        fontSize: '16px',
-        color: '#b9ad87',
-      })
-      .setOrigin(0.5);
-    this.add
-      .text(GAME_W / 2, GAME_H - 34, 'v0.1 · Phaser 3 · VK Mini Apps', {
-        fontFamily: '"Rubik"',
-        fontSize: '13px',
-        color: '#71806f',
+        fontSize: '12px',
+        color: '#5f6f5f',
       })
       .setOrigin(0.5);
 
-    this.add.image(GAME_W / 2, GAME_H / 2, 'vignette').setAlpha(0.9);
-
-    const start = () => {
+    const zone = this.add.zone(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H).setInteractive();
+    zone.once('pointerdown', () => {
       sfx.unlock();
-      sfx.play('chest');
-      sfx.vibrate('medium');
-      // VK Bridge: инициализация + профиль (не блокирует переход)
-      void vk.init().then(async (inVK) => {
+      sfx.play('click');
+      this.cameras.main.fadeOut(380, 4, 12, 8);
+      this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, async () => {
+        await vk.init();
         const profile = await vk.getUserProfile();
-        if (inVK || profile.id) playerState.applyProfile(profile);
-        else if (!playerState.data.name) playerState.applyProfile(profile);
-      });
-      this.input.keyboard?.removeAllListeners();
-      this.cameras.main.fadeOut(380, 4, 16, 10);
-      this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
+        playerState.applyProfile(profile);
         this.scene.start('MapScene');
         this.scene.launch('UIScene');
       });
-    };
-    this.input.once('pointerdown', start);
-    this.input.keyboard?.once('keydown-SPACE', start);
-    this.input.keyboard?.once('keydown-ENTER', start);
-
-    this.cameras.main.fadeIn(400, 4, 16, 10);
-    this.tweens.add({ targets: [title1, title2], y: '-=14', duration: 700, ease: 'Cubic.easeOut' });
+    });
   }
 }

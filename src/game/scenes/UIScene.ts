@@ -13,6 +13,7 @@ import {
   GAME_H,
   CHAPTERS,
   PROMOS,
+  FRUIT_NAMES,
   getLevels,
   type LevelDef,
   type ChestDef,
@@ -205,7 +206,7 @@ export class UIScene extends Phaser.Scene {
 
   private refreshProfile(): void {
     const d = playerState.data;
-    const name = d.name || 'Искатель Монтесумы';
+    const name = d.name || 'Искатель Богов';
     this.nameText.setText(name.length > 22 ? name.slice(0, 21) + '…' : name);
     // инициалы в аватаре
     const old = this.avatarContainer.getByName('ident');
@@ -451,10 +452,10 @@ export class UIScene extends Phaser.Scene {
     gBox.strokePath();
     items.push(gBox);
     if (def.goal.type === 'collect') {
-      const icon = this.add.image(-156, goalY, `gem_${def.goal.kind}`).setScale(0.42);
+      const icon = this.add.image(-156, goalY, `fruit_${def.goal.kind}`).setScale(0.42);
       items.push(icon);
       items.push(
-        this.add.text(10, goalY + 1, `Собери ${def.goal.amount} самоцветов`, {
+        this.add.text(10, goalY + 1, `Собери ${def.goal.amount} × ${FRUIT_NAMES[def.goal.kind]}`, {
           fontFamily: RUBIK,
           fontSize: '16px',
           fontStyle: 'bold',
@@ -936,7 +937,7 @@ export class UIScene extends Phaser.Scene {
     av.fillCircle(0, -128, 42);
     av.lineStyle(4, 0xf5b52e, 1);
     av.strokeCircle(0, -128, 41);
-    const name = d.name || 'Искатель Монтесумы';
+    const name = d.name || 'Искатель Богов';
     const initials = name
       .split(' ')
       .map((w) => w[0])

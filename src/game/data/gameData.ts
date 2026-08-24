@@ -1,5 +1,6 @@
 // ============================================================
-// Мок-данные игры: уровни, главы, сундуки, акции.
+// Мок-данные игры «Лестница Бога»: уровни, главы, сундуки,
+// акции и БОЕВЫЕ НАВЫКИ (аналог тотемов).
 // В продакшене подменяются данными бэкенда / VK Bridge —
 // формат интерфейсов сохраняется.
 // ============================================================
@@ -7,22 +8,29 @@
 export const GAME_W = 540;
 export const GAME_H = 960;
 
-export type GemKind = 'ruby' | 'emerald' | 'sapphire' | 'topaz' | 'amethyst' | 'jade';
+export type FruitKind = 'apple' | 'orange' | 'grape' | 'banana' | 'lime' | 'berry';
 
-export const GEM_KINDS: GemKind[] = ['ruby', 'emerald', 'sapphire', 'topaz', 'amethyst', 'jade'];
+export const FRUIT_KINDS: FruitKind[] = ['apple', 'orange', 'grape', 'banana', 'lime', 'berry'];
 
-export const GEM_COLORS: Record<GemKind, { main: number; light: number; dark: number }> = {
-  ruby: { main: 0xe8384f, light: 0xff97a8, dark: 0x8f0f26 },
-  emerald: { main: 0x2ecc71, light: 0xa4ffc9, dark: 0x0c6b38 },
-  sapphire: { main: 0x3d7bff, light: 0xa3c6ff, dark: 0x16308f },
-  topaz: { main: 0xffb020, light: 0xffe493, dark: 0x96590a },
-  amethyst: { main: 0xb06bff, light: 0xe0bdff, dark: 0x5b21a8 },
-  jade: { main: 0x35d0c0, light: 0xb0fff4, dark: 0x0f6e63 },
+export const FRUIT_NAMES: Record<FruitKind, string> = {
+  apple: 'Яблоко',
+  orange: 'Апельсин',
+  grape: 'Виноград',
+  banana: 'Банан',
+  lime: 'Лайм',
+  berry: 'Ягода',
+};
+
+export const FRUIT_COLORS: Record<FruitKind, { main: number; light: number; dark: number }> = {
+  apple: { main: 0xe8384f, light: 0xff97a8, dark: 0x8f0f26 },
+  orange: { main: 0xff9020, light: 0xffcf8a, dark: 0xa34e00 },
+  grape: { main: 0xb06bff, light: 0xe0bdff, dark: 0x5b21a8 },
+  banana: { main: 0xffd23e, light: 0xfff0a8, dark: 0xb08a00 },
+  lime: { main: 0x7ed321, light: 0xc8f58a, dark: 0x3a7a00 },
+  berry: { main: 0x5a8bff, light: 0xa3c6ff, dark: 0x1c3a9e },
 };
 
 export const THEME = {
-  bgDeep: '#081a10',
-  bgMid: '#0d2818',
   gold: 0xf5b52e,
   goldDeep: 0xc98a12,
   jade: 0x2ee6a8,
@@ -33,7 +41,7 @@ export const THEME = {
 
 export type GoalDef =
   | { type: 'score'; amount: number }
-  | { type: 'collect'; kind: GemKind; amount: number };
+  | { type: 'collect'; kind: FruitKind; amount: number };
 
 export interface LevelDef {
   id: number;
@@ -55,24 +63,24 @@ export interface ChapterDef {
 }
 
 export const CHAPTERS: ChapterDef[] = [
-  { from: 1, to: 8, title: 'ДЖУНГЛИ', num: 'Глава I' },
-  { from: 9, to: 16, title: 'ХРАМ ЛУНЫ', num: 'Глава II' },
-  { from: 17, to: 24, title: 'ПИРАМИДА СОЛНЦА', num: 'Глава III' },
+  { from: 1, to: 8, title: 'СТУПЕНИ РАССВЕТА', num: 'Лестница I' },
+  { from: 9, to: 16, title: 'ЛУННАЯ ТЕРРАСА', num: 'Лестница II' },
+  { from: 17, to: 24, title: 'ОБИТЕЛЬ БОГОВ', num: 'Лестница III' },
 ];
 
 const LEVEL_NAMES = [
-  'Врата джунглей', 'Тропа лиан', 'Река Капок', 'Поляна светлячков', 'Каменные идолы',
-  'Перевал ревунов', 'Гнездо кетцаля', 'Страж джунглей',
-  'Лунные врата', 'Зал эха', 'Подземное озеро', 'Нефритовый склеп', 'Змеиный коридор',
-  'Обсерватория звёзд', 'Алтарь подношений', 'Верховный жрец',
-  'Солнечная лестница', 'Золотая терраса', 'Чертог тронов', 'Сокровищница империи',
-  'Обсидиановый мост', 'Сердце пирамиды', 'Врата Монтесумы', 'Каменный колосс',
+  'Врата рассвета', 'Первая ступень', 'Тропа ветров', 'Сад птиц', 'Каменные стражи',
+  'Колодец эха', 'Звёздная тропа', 'Хранитель лестницы',
+  'Лунные ступени', 'Зал шёпотов', 'Серебряный мост', 'Терраса снов', 'Змеиный проём',
+  'Обсерватория', 'Алтарь подношений', 'Жрец Луны',
+  'Солнечные врата', 'Золотая терраса', 'Чертог грома', 'Сокровищница богов',
+  'Мост над облаками', 'Сердце небес', 'Трон зарницы', 'Истукан Солнца',
 ];
 
 const BOSS_NAMES: Record<number, string> = {
-  8: 'Страж джунглей',
-  16: 'Верховный жрец Луны',
-  24: 'Каменный колосс',
+  8: 'Хранитель лестницы',
+  16: 'Жрец Луны',
+  24: 'Истукан Солнца',
 };
 
 export function getLevels(): LevelDef[] {
@@ -81,10 +89,10 @@ export function getLevels(): LevelDef[] {
     const boss = id % 8 === 0;
     let goal: GoalDef;
     if (boss) {
-      const kind = GEM_KINDS[(id === 8 ? 0 : id === 16 ? 4 : 2)];
+      const kind = FRUIT_KINDS[id === 8 ? 0 : id === 16 ? 2 : 5];
       goal = { type: 'collect', kind, amount: 18 + (id / 8) * 5 };
     } else if (id % 2 === 0) {
-      const kind = GEM_KINDS[(id * 3 + 1) % 6];
+      const kind = FRUIT_KINDS[(id * 3 + 1) % 6];
       goal = { type: 'collect', kind, amount: 12 + Math.floor(id * 0.7) };
     } else {
       goal = { type: 'score', amount: 1100 + id * 140 };
@@ -113,10 +121,10 @@ export interface ChestDef {
 }
 
 export const CHESTS: ChestDef[] = [
-  { id: 'chest_jungle', afterLevel: 6, coins: 200, gems: 2, label: 'Сундук джунглей' },
+  { id: 'chest_dawn', afterLevel: 6, coins: 200, gems: 2, label: 'Сундук рассвета' },
   { id: 'chest_moon', afterLevel: 12, coins: 350, gems: 4, label: 'Лунный сундук' },
   { id: 'chest_sun', afterLevel: 18, coins: 500, gems: 6, label: 'Солнечный сундук' },
-  { id: 'chest_montezuma', afterLevel: 24, coins: 1000, gems: 12, label: 'Сокровищница Монтесумы' },
+  { id: 'chest_gods', afterLevel: 24, coins: 1000, gems: 12, label: 'Дар верховного бога' },
 ];
 
 export interface PromoDef {
@@ -154,12 +162,58 @@ export const PROMOS: PromoDef[] = [
   {
     id: 'promo_collection',
     tag: 'КОЛЛЕКЦИЯ',
-    title: 'Перья Кетцаля',
-    desc: 'Новая коллекция самоцветов уже ждет в магазине',
+    title: 'Перья Солнечной птицы',
+    desc: 'Новая коллекция фруктов уже ждёт в магазине',
     kind: 'collection',
     durationMin: 1440,
     accent: 0xb06bff,
     cta: 'В магазин',
+  },
+];
+
+// ---------- Боевые навыки (аналог тотемов) ----------
+
+export type SkillEffect = 'blast' | 'cross' | 'storm';
+
+export interface SkillDef {
+  id: string;
+  name: string;
+  /** каким фруктом заряжается */
+  kind: FruitKind;
+  /** сколько фруктов нужно собрать для заряда */
+  charge: number;
+  effect: SkillEffect;
+  desc: string;
+  icon: string;
+}
+
+export const SKILLS: SkillDef[] = [
+  {
+    id: 'fire',
+    name: 'ОГОНЬ БОГОВ',
+    kind: 'apple',
+    charge: 12,
+    effect: 'blast',
+    desc: 'Взрыв 3×3 в выбранной клетке',
+    icon: 'skill_fire',
+  },
+  {
+    id: 'bolt',
+    name: 'НЕБЕСНАЯ МОЛНИЯ',
+    kind: 'banana',
+    charge: 12,
+    effect: 'cross',
+    desc: 'Молния бьёт крестом: весь ряд и колонка',
+    icon: 'skill_bolt',
+  },
+  {
+    id: 'wind',
+    name: 'ДУХ ВЕТРА',
+    kind: 'lime',
+    charge: 14,
+    effect: 'storm',
+    desc: 'Ветер уносит все фрукты самого частого вида',
+    icon: 'skill_wind',
   },
 ];
 

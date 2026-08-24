@@ -26,7 +26,7 @@ export default function App() {
 
       {/* Боковые руны — видны только на широких экранах */}
       <div className="side-runes font-display pointer-events-none absolute left-4 top-1/2 hidden -translate-y-1/2 text-sm text-[#f5b52e]/30 lg:block">
-        СОКРОВИЩА · МОНТЕСУМЫ · ТРИ В РЯД
+        ЛЕСТНИЦА · БОГА · ТРИ В РЯД
       </div>
       <div className="side-runes font-display pointer-events-none absolute right-4 top-1/2 hidden -translate-y-1/2 text-sm text-[#2ee6a8]/25 lg:block">
         VK MINI APPS · PHASER 3 · MATCH-3

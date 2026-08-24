@@ -31,7 +31,7 @@ export interface SaveData {
 
 export const MAX_LIVES = 5;
 export const LIFE_REGEN_MS = 5 * 60 * 1000; // 1 жизнь / 5 минут
-const SAVE_KEY = 'montezuma_save_v1';
+const SAVE_KEY = 'stairway_gods_save_v1';
 
 const DEFAULTS: SaveData = {
   coins: 300,
@@ -199,7 +199,7 @@ class PlayerState {
   // ---------- Профиль / настройки ----------
   applyProfile(p: VKProfile): void {
     this.data.vkId = p.id;
-    this.data.name = p.id ? `${p.firstName} ${p.lastName}`.trim() : 'Искатель Монтесумы';
+    this.data.name = p.id ? `${p.firstName} ${p.lastName}`.trim() : 'Искатель Богов';
     this.data.photo = p.photo;
     this.save();
     this.emit();

@@ -40,7 +40,7 @@ class VKBridgeService {
     return this.ready;
   }
 
-  /** Профиль игрока (аватар, имя). Вне ВК — мок «Гость Монтесумы». */
+  /** Профиль игрока (аватар, имя). Вне ВК — мок «Искатель Богов». */
   async getUserProfile(): Promise<VKProfile> {
     if (this.inVK && this.ready) {
       try {
@@ -51,7 +51,7 @@ class VKBridgeService {
       }
     }
     await delay(200);
-    return { id: 0, firstName: 'Искатель', lastName: 'Монтесумы', photo: '' };
+    return { id: 0, firstName: 'Искатель', lastName: 'Богов', photo: '' };
   }
 
   /** Rewarded-реклама. Возвращает true, если награду можно выдать. */
